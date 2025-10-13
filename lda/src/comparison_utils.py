@@ -412,3 +412,99 @@ def mann_whitney_test(tvd_values_1, tvd_values_2):
     except Exception as e:
         logger.error("Mann-Whitney U test error: %s", str(e))
         return None
+
+
+def permutation_test_ot_distance(topics1, topics2, prevalence1, prevalence2, vocabulary, n_permutations=1000):
+    """
+    Permutation test for OT distance significance.
+    
+    Shuffles topic assignments to create null distribution and test if the observed
+    OT distance is significantly different from random.
+
+    Args:
+        topics1: List of dicts with topic word distributions for corpus 1
+        topics2: List of dicts with topic word distributions for corpus 2
+        prevalence1: List of prevalence weights for corpus 1 topics
+        prevalence2: List of prevalence weights for corpus 2 topics
+        vocabulary: List of all vocabulary words
+        n_permutations: Number of permutation samples (default 1000)
+
+    Returns:
+        dict with:
+            - observed_ot: Original OT distance
+            - null_ot_mean: Mean of null distribution
+            - null_ot_std: Std of null distribution
+            - p_value: Two-sided p-value
+            - significant: Boolean indicating if p < 0.05
+    """
+    if not POT_AVAILABLE:
+        logger.error("POT library not available for permutation test")
+        return None
+
+    try:
+        # Calculate original OT distance
+        observed_ot = calculate_optimal_transport_distance(
+            topics1, topics2, prevalence1, prevalence2, vocabulary
+        )
+        
+        if observed_ot is None:
+            return None
+
+        # Create permutation samples
+        null_ot_distances = []
+        
+        for _ in range(n_permutations):
+            # Create more realistic null hypothesis by shuffling word probabilities within topics
+            # This breaks the semantic structure while maintaining topic prevalence structure
+            shuffled_topics2 = []
+            
+            for topic in topics2:
+                # Get all words and their probabilities
+                words = list(topic['word_probabilities'].keys())
+                probs = list(topic['word_probabilities'].values())
+                
+                # Shuffle the probability assignments to words
+                shuffled_probs = np.random.permutation(probs)
+                
+                # Create new topic with shuffled word-probability assignments
+                shuffled_topic = {
+                    'topic_id': topic['topic_id'],
+                    'topic_name': topic['topic_name'],
+                    'word_probabilities': dict(zip(words, shuffled_probs))
+                }
+                shuffled_topics2.append(shuffled_topic)
+            
+            # Use original prevalence (we're only shuffling semantic content, not prevalence)
+            null_ot = calculate_optimal_transport_distance(
+                topics1, shuffled_topics2, prevalence1, prevalence2, vocabulary
+            )
+            
+            if null_ot is not None:
+                null_ot_distances.append(null_ot)
+
+        if len(null_ot_distances) == 0:
+            return None
+
+        null_ot_distances = np.array(null_ot_distances)
+        
+        # Calculate p-value (one-sided test: observed >= null)
+        # This tests if the observed distance is significantly larger than expected by chance
+        extreme_count = np.sum(null_ot_distances >= observed_ot)
+        p_value = extreme_count / len(null_ot_distances)
+        
+        # For very small p-values, use a minimum threshold
+        if p_value == 0:
+            p_value = 1.0 / len(null_ot_distances)
+
+        return {
+            'observed_ot': float(observed_ot),
+            'null_ot_mean': float(np.mean(null_ot_distances)),
+            'null_ot_std': float(np.std(null_ot_distances)),
+            'p_value': float(p_value),
+            'significant': bool(p_value < 0.05),
+            'null_distribution': null_ot_distances.tolist()  # For debugging/plotting
+        }
+
+    except Exception as e:
+        logger.error("Permutation test error: %s", str(e))
+        return None

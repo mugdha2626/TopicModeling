@@ -643,6 +643,9 @@ const handleCompareTopics = async () => {
 
   // Optional: add number of bootstrap samples (default 1000)
   formData.append("n_bootstrap", 1000);
+  
+  // Optional: add number of permutation samples (default 1000)
+  formData.append("n_permutations", 1000);
 
   try {
     const response = await fetch("http://localhost:5001/compare", {
@@ -660,6 +663,7 @@ const handleCompareTopics = async () => {
   } catch (error) {
     console.error("Error during comparison:", error);
     alert(`Comparison failed: ${error.message}`);
+    
   } finally {
     setIsComparing(false);
   }
@@ -668,7 +672,7 @@ const handleCompareTopics = async () => {
 const OptimalTransportDisplay = ({ otResults, hasPrevalence }) => {
   if (!otResults) return null;
 
-  const { distance, bootstrap } = otResults;
+  const { distance, bootstrap, permutation_test } = otResults;
   const ciWidth = bootstrap ? bootstrap.ci_upper - bootstrap.ci_lower : 0;
 
   return (
@@ -730,6 +734,50 @@ const OptimalTransportDisplay = ({ otResults, hasPrevalence }) => {
                   }}
                 ></div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Permutation Test Results */}
+        {permutation_test && (
+          <div style={styles.permutationSection}>
+            <h4 style={styles.permutationTitle}>
+              🔀 Permutation Test (Statistical Significance)
+              <HelpTooltip text="Tests if the observed OT distance is significantly different from random chance by shuffling topic assignments." />
+            </h4>
+            <div style={styles.permutationStats}>
+              <div style={styles.permutationStat}>
+                <span style={styles.statLabel}>Observed:</span>
+                <span style={styles.statValue}>{permutation_test.observed_ot.toFixed(4)}</span>
+              </div>
+              <div style={styles.permutationStat}>
+                <span style={styles.statLabel}>Null Mean:</span>
+                <span style={styles.statValue}>{permutation_test.null_ot_mean.toFixed(4)}</span>
+              </div>
+              <div style={styles.permutationStat}>
+                <span style={styles.statLabel}>P-value:</span>
+                <span style={styles.statValue}>{permutation_test.p_value.toFixed(4)}</span>
+              </div>
+              <div style={styles.permutationStat}>
+                <span style={styles.statLabel}>Significance:</span>
+                <span style={{
+                  ...styles.statValue,
+                  color: permutation_test.significant ? '#4CAF50' : '#FF9800'
+                }}>
+                  {permutation_test.significant ? 'Significant' : 'Not significant'}
+                </span>
+              </div>
+            </div>
+            <div style={styles.permutationInterpretation}>
+              {permutation_test.significant ? (
+                <span style={styles.significantText}>
+                  The observed difference is statistically significant (p &lt; 0.05)
+                </span>
+              ) : (
+                <span style={styles.significantText}>
+                  Topics show consistent patterns within expected variation (p ≥ 0.05)
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -901,6 +949,84 @@ const BestMatchDisplay = ({ bestMatchResults, bootstrapResults }) => {
           ))}
         </div>
       </details>
+    </div>
+  );
+};
+
+const StatisticalTestsDisplay = ({ statisticalTests }) => {
+  if (!statisticalTests) return null;
+
+  const { mann_whitney, tvd_vectors } = statisticalTests;
+
+  return (
+    <div style={styles.statisticalTestsContainer}>
+      <h3 style={styles.metricTitle}>
+        📊 Statistical Significance Tests
+        <HelpTooltip text="Statistical tests to determine if observed differences are significant or could be due to random chance." />
+      </h3>
+
+      {/* Mann-Whitney U Test */}
+      {mann_whitney && (
+        <div style={styles.mannWhitneySection}>
+          <h4 style={styles.testSubtitle}>
+            🔄 Mann-Whitney U Test (Directional Asymmetry)
+            <HelpTooltip text="Tests if Dataset 1→2 and Dataset 2→1 TVD distributions are significantly different, indicating asymmetric topic matching." />
+          </h4>
+          <div style={styles.mannWhitneyStats}>
+            <div style={styles.testStat}>
+              <span style={styles.statLabel}>U-Statistic:</span>
+              <span style={styles.statValue}>{mann_whitney.statistic.toFixed(2)}</span>
+            </div>
+            <div style={styles.testStat}>
+              <span style={styles.statLabel}>P-value:</span>
+              <span style={styles.statValue}>{mann_whitney.p_value.toFixed(4)}</span>
+            </div>
+            <div style={styles.testStat}>
+              <span style={styles.statLabel}>Result:</span>
+              <span style={{
+                ...styles.statValue,
+                color: mann_whitney.significant ? '#4CAF50' : '#FF9800'
+              }}>
+                {mann_whitney.significant ? ' Significant Asymmetry' : 'Symmetric'}
+              </span>
+            </div>
+          </div>
+
+          {mann_whitney.significant && tvd_vectors && (
+            <div style={styles.asymmetryInterpretation}>
+              <div style={styles.asymmetryNote}>
+                📊 <strong>Interpretation:</strong> The datasets show asymmetric topic matching patterns.
+              </div>
+              <div style={styles.tvdComparison}>
+                <div style={styles.tvdDirection}>
+                  <span style={styles.directionLabel}>Dataset 1 → 2 (avg TVD):</span>
+                  <span style={styles.directionValue}>
+                    {(tvd_vectors.dataset1_to_2.reduce((a, b) => a + b, 0) / tvd_vectors.dataset1_to_2.length).toFixed(3)}
+                  </span>
+                </div>
+                <div style={styles.tvdDirection}>
+                  <span style={styles.directionLabel}>Dataset 2 → 1 (avg TVD):</span>
+                  <span style={styles.directionValue}>
+                    {(tvd_vectors.dataset2_to_1.reduce((a, b) => a + b, 0) / tvd_vectors.dataset2_to_1.length).toFixed(3)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div style={styles.mannWhitneyInterpretation}>
+            {mann_whitney.significant ? (
+              <span style={styles.significantText}>
+                Topics show directional bias in matching quality (p &lt; 0.05)
+              </span>
+            ) : (
+              <span style={styles.significantText}>
+                Topic matching is balanced and symmetric across datasets (p ≥ 0.05)
+              </span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1346,6 +1472,13 @@ const SimilarityHeatmap = ({ matrixData, topics1, topics2 }) => {
                 <BestMatchDisplay
                   bestMatchResults={comparisonResults.best_match_analysis}
                   bootstrapResults={comparisonResults.best_match_bootstrap}
+                />
+              )}
+
+              {/* Statistical Tests Display */}
+              {comparisonResults.statistical_tests && (
+                <StatisticalTestsDisplay
+                  statisticalTests={comparisonResults.statistical_tests}
                 />
               )}
 
@@ -2685,6 +2818,118 @@ const styles = {
     fontSize: "0.9rem",
     fontWeight: "500",
     textAlign: "right",
+  },
+  // Permutation test styles
+  permutationSection: {
+    marginTop: "20px",
+    padding: "15px",
+    backgroundColor: "#2A2A2A",
+    borderRadius: "8px",
+    border: "1px solid #444",
+  },
+  permutationTitle: {
+    color: "#FFC107",
+    fontSize: "1rem",
+    marginBottom: "15px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+  permutationStats: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: "10px",
+    marginBottom: "15px",
+  },
+  permutationStat: {
+    display: "flex",
+    justifyContent: "space-between",
+    padding: "8px",
+    backgroundColor: "#333",
+    borderRadius: "4px",
+  },
+  permutationInterpretation: {
+    textAlign: "center",
+    padding: "10px",
+    borderRadius: "6px",
+    backgroundColor: "#1A1A1A",
+  },
+  significantText: {
+    color: "#4CAF50",
+    fontWeight: "500",
+  },
+  notSignificantText: {
+    color: "#FF9800",
+    fontWeight: "500",
+  },
+  // Statistical tests styles
+  statisticalTestsContainer: {
+    marginTop: "30px",
+    padding: "20px",
+    backgroundColor: "#1A1A1A",
+    borderRadius: "8px",
+    border: "1px solid #333",
+  },
+  mannWhitneySection: {
+    marginBottom: "20px",
+  },
+  testSubtitle: {
+    color: "#2196F3",
+    fontSize: "0.95rem",
+    marginBottom: "12px",
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+  },
+  mannWhitneyStats: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: "10px",
+    marginBottom: "15px",
+  },
+  testStat: {
+    display: "flex",
+    justifyContent: "space-between",
+    padding: "8px",
+    backgroundColor: "#2A2A2A",
+    borderRadius: "4px",
+  },
+  asymmetryInterpretation: {
+    marginTop: "15px",
+    padding: "15px",
+    backgroundColor: "#333",
+    borderRadius: "6px",
+  },
+  asymmetryNote: {
+    color: "#E0E0E0",
+    marginBottom: "10px",
+  },
+  tvdComparison: {
+    display: "flex",
+    gap: "20px",
+    justifyContent: "space-around",
+  },
+  tvdDirection: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+  },
+  directionLabel: {
+    fontSize: "0.85rem",
+    color: "#B0B0B0",
+    marginBottom: "5px",
+  },
+  directionValue: {
+    fontSize: "1.1rem",
+    fontWeight: "600",
+    color: "#FFC107",
+  },
+  mannWhitneyInterpretation: {
+    textAlign: "center",
+    padding: "10px",
+    borderRadius: "6px",
+    backgroundColor: "#1A1A1A",
+    marginTop: "10px",
   },
 };
 

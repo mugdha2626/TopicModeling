@@ -38,7 +38,8 @@ from comparison_utils import (
     calculate_best_match_metrics,
     bootstrap_ot_distance,
     bootstrap_best_match_metrics,
-    mann_whitney_test
+    mann_whitney_test,
+    permutation_test_ot_distance
 )
 
 app = Flask(__name__)
@@ -1469,6 +1470,54 @@ def compare_topics():
         print(f"      Reciprocal Count: {best_match_bootstrap['reciprocal_count']['mean']:.1f}", file=sys.stderr, flush=True)
         print()
 
+        # Calculate permutation test for OT distance significance
+        logger.info("Performing permutation test for OT distance significance...")
+        print("🔀 Computing Permutation Test for OT Distance...", file=sys.stderr, flush=True)
+        print("   This tests if the observed difference is statistically significant...", file=sys.stderr, flush=True)
+        
+        n_permutations = int(request.form.get("n_permutations", 1000))
+        permutation_result = permutation_test_ot_distance(
+            topics1_list, topics2_list, prevalence1, prevalence2, vocabulary, n_permutations
+        )
+        
+        if permutation_result:
+            print(f"   ✅ Permutation Test Complete:", file=sys.stderr, flush=True)
+            print(f"      Observed OT: {permutation_result['observed_ot']:.4f}", file=sys.stderr, flush=True)
+            print(f"      Null Mean: {permutation_result['null_ot_mean']:.4f}", file=sys.stderr, flush=True)
+            print(f"      Null Std: {permutation_result['null_ot_std']:.4f}", file=sys.stderr, flush=True)
+            print(f"      P-value: {permutation_result['p_value']:.4f}", file=sys.stderr, flush=True)
+            print(f"      {'✅ Significant' if permutation_result['significant'] else '❌ Not significant'} (α=0.05)", file=sys.stderr, flush=True)
+        else:
+            print("   ⚠️  Permutation test failed", file=sys.stderr, flush=True)
+        print()
+
+        # Prepare TVD vectors for potential Mann-Whitney test
+        # Extract TVD values for both directions
+        tvd_values_1to2 = [m['tvd'] for m in best_match_results['best_matches_1to2']]
+        tvd_values_2to1 = [m['tvd'] for m in best_match_results['best_matches_2to1']]
+        
+        # Perform Mann-Whitney test to compare directional differences
+        logger.info("Performing Mann-Whitney test to compare directional TVD distributions...")
+        print("📊 Computing Mann-Whitney U Test (1→2 vs 2→1 TVD distributions)...", file=sys.stderr, flush=True)
+        
+        mann_whitney_result = mann_whitney_test(tvd_values_1to2, tvd_values_2to1)
+        
+        if mann_whitney_result:
+            print(f"   ✅ Mann-Whitney Test Complete:", file=sys.stderr, flush=True)
+            print(f"      U-statistic: {mann_whitney_result['statistic']:.2f}", file=sys.stderr, flush=True)
+            print(f"      P-value: {mann_whitney_result['p_value']:.4f}", file=sys.stderr, flush=True)
+            print(f"      {'✅ Significant asymmetry' if mann_whitney_result['significant'] else '❌ No significant asymmetry'} (α=0.05)", file=sys.stderr, flush=True)
+            if mann_whitney_result['significant']:
+                mean_1to2 = np.mean(tvd_values_1to2)
+                mean_2to1 = np.mean(tvd_values_2to1)
+                if mean_1to2 < mean_2to1:
+                    print(f"      → Dataset 1 topics are more stable (better matches in Dataset 2)", file=sys.stderr, flush=True)
+                else:
+                    print(f"      → Dataset 2 topics are more stable (better matches in Dataset 1)", file=sys.stderr, flush=True)
+        else:
+            print("   ⚠️  Mann-Whitney test failed", file=sys.stderr, flush=True)
+        print()
+
         # Print detailed reciprocal matches
         if best_match_results['reciprocal_matches']:
             print("🔄 DETAILED RECIPROCAL MATCHES (Stable Topics):", file=sys.stderr, flush=True)
@@ -1526,10 +1575,18 @@ def compare_topics():
             # Enhanced metrics
             'optimal_transport': {
                 'distance': ot_distance,
-                'bootstrap': ot_bootstrap
+                'bootstrap': ot_bootstrap,
+                'permutation_test': permutation_result
             },
             'best_match_analysis': best_match_results,
             'best_match_bootstrap': best_match_bootstrap,
+            'statistical_tests': {
+                'mann_whitney': mann_whitney_result,
+                'tvd_vectors': {
+                    'dataset1_to_2': tvd_values_1to2,
+                    'dataset2_to_1': tvd_values_2to1
+                }
+            },
             'has_prevalence': prevalence_file1 is not None and prevalence_file2 is not None
         }
 
