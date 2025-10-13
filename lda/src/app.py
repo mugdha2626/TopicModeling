@@ -86,7 +86,20 @@ ENHANCED_STOPWORDS = {
     'specific', 'general', 'particular', 'example', 'examples', 'case', 'cases',
     'significant', 'observed', 'obtained', 'performed', 'present',
     'related', 'associated', 'compared', 'due', 'examined', 'found',
-    'increased', 'decreased', 'range', 'level', 'levels', 'term', 'terms'
+    'increased', 'decreased', 'range', 'level', 'levels', 'term', 'terms',
+
+    # Additional generic/structural terms that should be filtered
+    'condition', 'conditions', 'policy', 'policies', 'object', 'objects',
+    'algorithm', 'algorithms', 'task', 'tasks', 'mode', 'modes', 'action', 'actions',
+    'equation', 'equations', 'reason', 'reasons', 'visual', 'visually',
+    'lemma', 'lemmas', 'association', 'associations', 'knowledge',
+    'together', 'factor', 'factors', 'refer', 'refers', 'optimal', 'optimally',
+    'image', 'images', 'model', 'models', 'function', 'functions',
+    'approach', 'approaches', 'technique', 'techniques', 'problem', 'problems',
+    'solution', 'solutions', 'parameter', 'parameters', 'variable', 'variables',
+    'measure', 'measures', 'performance', 'evaluation', 'metric', 'metrics',
+    'assumption', 'assumptions', 'metal', 'metals', 'plan', 'plans', 'speak', 'speaking',
+    'qwen', 'control', 'controls', 'effect', 'effects', 'change', 'changes'
 }
 
 def preprocess_text(text):
@@ -537,24 +550,24 @@ def analyze_hdp_task(file, form_data):
 
         # Train HDP model
         # HDP automatically discovers the number of topics
-        # T and K control the truncation levels (should be moderate, not corpus-dependent)
+        # T and K control the truncation levels (should allow reasonable topic discovery)
         hdp_model = HdpModel(
             corpus=corpus,
             id2word=dictionary,
             random_state=42,
-            alpha=alpha,         # Document-topic concentration (default 0.1)
-            gamma=gamma,         # Topic-level concentration (default 0.01)
-            eta=0.01,            # Topic-word concentration (lower = more focused topics)
-            T=15,                # First-level truncation (max topics to consider)
-            K=5,                 # Second-level truncation (max topics per document)
+            alpha=alpha,         # Document-topic concentration (default 1.0)
+            gamma=1.0,           # Topic-level concentration (higher = more topics, default 1.0)
+            eta=0.01,            # Topic-word concentration (sparsity in word distribution)
+            T=150,               # First-level truncation (upper bound, should be generous)
+            K=15,                # Second-level truncation (max topics per document)
             kappa=0.75,          # Learning rate decay
             tau=64.0             # Learning rate delay
         )
 
         # Extract significant topics (filter weak/noise topics)
         all_topics = hdp_model.get_topics()
-        # More strict filtering: only keep topics with substantial word mass
-        significant_topic_indices = [i for i, t in enumerate(all_topics) if np.sum(t) > 1.0]
+        # Filter topics with meaningful word mass (not too strict)
+        significant_topic_indices = [i for i, t in enumerate(all_topics) if np.sum(t) > 0.5]
         num_active_topics = len(significant_topic_indices)
 
         if num_active_topics == 0:
