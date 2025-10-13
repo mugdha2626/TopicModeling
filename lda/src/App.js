@@ -463,7 +463,8 @@ const App = () => {
     // HDP uses automatic parameter tuning - no user input needed
 
     // Choose endpoint based on model type
-    const endpoint = modelType === "HDP" ? "http://localhost:5001/analyze-hdp" : "http://localhost:5001/analyze";
+    const apiBaseUrl = process.env.REACT_APP_API_URL || "http://localhost:5001";
+    const endpoint = modelType === "HDP" ? `${apiBaseUrl}/analyze-hdp` : `${apiBaseUrl}/analyze`;
 
     try {
       const response = await fetch(endpoint, {
@@ -648,7 +649,8 @@ const handleCompareTopics = async () => {
   formData.append("n_permutations", 1000);
 
   try {
-    const response = await fetch("http://localhost:5001/compare", {
+    const apiBaseUrl = process.env.REACT_APP_API_URL || "http://localhost:5001";
+    const response = await fetch(`${apiBaseUrl}/compare`, {
       method: "POST",
       body: formData,
     });
