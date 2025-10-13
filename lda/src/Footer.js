@@ -7,7 +7,7 @@ const Footer = () => {
   return (
     <footer style={styles.footer}>
       <p style={styles.text}>
-        <FontAwesomeIcon icon={faCopyright} /> 2024 Kushal Peddakotla <br/>All rights reserved.
+        <FontAwesomeIcon icon={faCopyright} /> <br/>All rights reserved.
       </p>
       <p style={styles.text}>
         Developed in collaboration with Dr. Javier Gomez-Lavin and the Purdue VRAI Lab.
@@ -23,7 +23,7 @@ const Footer = () => {
       </p>
     <div style={styles.socialLinks}>
         <a
-          href="https://github.com/kpeddakotla/LDATopicModeling"
+          href=""
           target="_blank"
           rel="noopener noreferrer"
           style={styles.socialLink}

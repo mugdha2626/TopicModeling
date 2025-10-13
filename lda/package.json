@@ -22,7 +22,7 @@
   "scripts": {
     "start": "concurrently \"npm run start-backend\" \"npm run start-frontend\"",
     "start-frontend": "react-scripts start",
-    "start-backend": "python src/app.py",
+    "start-backend": "python3 src/app.py",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
