@@ -54,8 +54,12 @@ logging.getLogger("PIL").setLevel(logging.INFO)
 
 
 try:
+    # Download required NLTK data
     nltk.download("wordnet", quiet=True)
     nltk.download("stopwords", quiet=True)
+    nltk.download("omw-1.4", quiet=True)  # CRITICAL: Required for WordNet lemmatizer
+    nltk.download("averaged_perceptron_tagger", quiet=True)  # For POS tagging
+
     # Test if downloads worked
     from nltk.corpus import stopwords
     test_stops = stopwords.words("english")
@@ -99,7 +103,87 @@ ENHANCED_STOPWORDS = {
     'qwen', 'effect', 'effects', 'change', 'changes',
 
     # Words that are TOO generic even in CS (appear everywhere)
-    'system', 'systems', 'process', 'method', 'methods', 'data'
+    'system', 'systems', 'process', 'method', 'methods', 'data',
+
+    # Common place names (often appear in author affiliations)
+    'germany', 'london', 'york', 'california', 'missouri', 'china', 'italy',
+    'france', 'england', 'boston', 'chicago', 'amsterdam', 'oxford', 'cambridge',
+    'stanford', 'harvard', 'princeton', 'berkeley', 'toronto', 'montreal',
+    'manchester', 'edinburgh', 'glasgow', 'dublin', 'paris', 'berlin', 'munich',
+    'tokyo', 'korea', 'japan', 'australia', 'sydney', 'melbourne', 'canada',
+
+    # Common surnames (often from author names leaking into text)
+    'smith', 'johnson', 'williams', 'brown', 'jones', 'miller', 'davis',
+    'wilson', 'moore', 'taylor', 'anderson', 'thomas', 'jackson', 'white',
+    'harris', 'martin', 'thompson', 'garcia', 'martinez', 'robinson',
+    'clark', 'rodriguez', 'lewis', 'lee', 'walker', 'hall', 'allen',
+    'young', 'hernandez', 'king', 'wright', 'lopez', 'hill', 'scott',
+    'green', 'adams', 'baker', 'gonzalez', 'nelson', 'carter', 'mitchell',
+    'perez', 'roberts', 'turner', 'phillips', 'campbell', 'parker', 'evans',
+    'edwards', 'collins', 'stewart', 'sanchez', 'morris', 'rogers', 'reed',
+    'cook', 'morgan', 'bell', 'murphy', 'bailey', 'rivera', 'cooper',
+    'richardson', 'cox', 'howard', 'ward', 'torres', 'peterson', 'gray',
+    'ramirez', 'james', 'watson', 'brooks', 'kelly', 'sanders', 'price',
+    'bennett', 'wood', 'barnes', 'ross', 'henderson', 'coleman', 'jenkins',
+    'perry', 'powell', 'long', 'patterson', 'hughes', 'flores', 'washington',
+    'butler', 'simmons', 'foster', 'gonzales', 'bryant', 'alexander', 'russell',
+    'griffin', 'diaz', 'hayes', 'myers', 'ford', 'hamilton', 'graham', 'sullivan',
+    'wallace', 'woods', 'cole', 'west', 'jordan', 'owens', 'reynolds', 'fisher',
+    'ellis', 'harrison', 'gibson', 'mcdonald', 'cruz', 'marshall', 'ortiz',
+    'gomez', 'murray', 'freeman', 'wells', 'webb', 'simpson', 'stevens',
+    'tucker', 'porter', 'hunter', 'hicks', 'crawford', 'henry', 'boyd',
+    'mason', 'morales', 'kennedy', 'warren', 'dixon', 'ramos', 'reyes',
+    'burns', 'gordon', 'shaw', 'holmes', 'rice', 'robertson', 'hunt',
+    'black', 'daniels', 'palmer', 'mills', 'nichols', 'grant', 'knight',
+    'ferguson', 'rose', 'stone', 'hawkins', 'dunn', 'perkins', 'hudson',
+    'spencer', 'gardner', 'stephens', 'payne', 'pierce', 'berry', 'matthews',
+    'arnold', 'wagner', 'willis', 'ray', 'watkins', 'olson', 'carroll',
+    'duncan', 'snyder', 'hart', 'cunningham', 'bradley', 'lane', 'andrews',
+    'ruiz', 'harper', 'fox', 'riley', 'armstrong', 'carpenter', 'weaver',
+    'greene', 'lawrence', 'elliott', 'chavez', 'sims', 'austin', 'peters',
+    'kelley', 'franklin', 'lawson', 'fields', 'gutierrez', 'ryan', 'schmidt',
+    'carr', 'vasquez', 'castillo', 'wheeler', 'chapman', 'oliver', 'montgomery',
+    'richards', 'williamson', 'johnston', 'banks', 'meyer', 'bishop', 'mccoy',
+    'howell', 'alvarez', 'morrison', 'hansen', 'fernandez', 'garza', 'harvey',
+    'little', 'burton', 'stanley', 'nguyen', 'george', 'jacobs', 'reid',
+    'kim', 'fuller', 'lynch', 'dean', 'gilbert', 'garrett', 'romero',
+    'welch', 'larson', 'frazier', 'burke', 'hanson', 'day', 'mendoza',
+    'moreno', 'bowman', 'medina', 'fowler', 'brewer', 'hoffman', 'carlson',
+    'silva', 'pearson', 'holland', 'douglas', 'fleming', 'jensen', 'vargas',
+    'byrd', 'davidson', 'hopkins', 'may', 'terry', 'herrera', 'wade',
+    'soto', 'walters', 'curtis', 'neal', 'caldwell', 'lowe', 'jennings',
+    'barnett', 'graves', 'jimenez', 'horton', 'shelton', 'barrett', 'obrien',
+    'castro', 'sutton', 'gregory', 'mckinney', 'lucas', 'miles', 'craig',
+    'rodriquez', 'chambers', 'holt', 'lambert', 'fletcher', 'watts', 'bates',
+    'hale', 'rhodes', 'pena', 'beck', 'newman', 'haynes', 'mcdaniel',
+    'mendez', 'bush', 'vaughn', 'parks', 'dawson', 'santiago', 'norris',
+    'hardy', 'love', 'steele', 'curry', 'powers', 'schultz', 'barker',
+    'guzman', 'page', 'munoz', 'ball', 'keller', 'chandler', 'weber',
+    'leonard', 'walsh', 'lyons', 'ramsey', 'wolfe', 'schneider', 'mullins',
+    'benson', 'sharp', 'bowen', 'daniel', 'barber', 'cummings', 'hines',
+    'baldwin', 'griffith', 'valdez', 'hubbard', 'salazar', 'reeves', 'warner',
+    'stevenson', 'burgess', 'santos', 'tate', 'cross', 'garner', 'mann',
+    'mack', 'moss', 'thornton', 'dennis', 'mcgee', 'farmer', 'delgado',
+    'aguilar', 'vega', 'glover', 'manning', 'cohen', 'harmon', 'rodgers',
+    'robbins', 'newton', 'todd', 'blair', 'higgins', 'ingram', 'reese',
+    'cannon', 'strickland', 'townsend', 'potter', 'goodwin', 'walton',
+    'rowe', 'hampton', 'ortega', 'patton', 'swanson', 'joseph', 'francis',
+    'goodman', 'maldonado', 'yates', 'becker', 'erickson', 'hodges',
+    'rios', 'conner', 'adkins', 'webster', 'norman', 'malone', 'hammond',
+    'flowers', 'cobb', 'moody', 'quinn', 'blake', 'maxwell', 'pope',
+    'floyd', 'osborne', 'paul', 'mccarthy', 'guerrero', 'lindsey', 'estrada',
+    'sandoval', 'gibbs', 'tyler', 'gross', 'fitzgerald', 'stokes', 'doyle',
+    'sherman', 'saunders', 'wise', 'colon', 'gill', 'alvarado', 'greer',
+    'padilla', 'simon', 'waters', 'nunez', 'ballard', 'schwartz', 'mcbride',
+
+    # Academic metadata terms that leak through
+    'pmcid', 'pubmed', 'doi', 'issn', 'isbn', 'copyright', 'license',
+    'elsevier', 'springer', 'wiley', 'pergamon', 'press', 'publisher', 'publication',
+
+    # Common affiliation/institutional words
+    'department', 'university', 'college', 'institute', 'school', 'center',
+    'laboratory', 'centre', 'faculty', 'division', 'hospital', 'clinic',
+    'science', 'sciences', 'medicine', 'psychology', 'neuroscience', 'biology'
 }
 
 # NOTE: Removed domain-specific CS/ML terms from stopwords that should be kept:
@@ -154,20 +238,27 @@ def preprocess_text(text):
         # Merge with enhanced academic stopwords
         english_stopwords.update(ENHANCED_STOPWORDS)
     
-    # Filter and lemmatize tokens
+    # FIXED: Lemmatize FIRST, then filter stopwords
+    # This catches words whose lemmas are stopwords (e.g., "studies" → "study")
     filtered_tokens = []
     for word in tokens:
-        if len(word) >= 3 and word not in english_stopwords and word.isalpha():
-            if lemmatizer:
-                # Try both noun and verb lemmatization for better results
-                noun_lemma = lemmatizer.lemmatize(word, pos='n')
-                verb_lemma = lemmatizer.lemmatize(word, pos='v')
-                # Use the shorter lemma (usually better)
-                lemma = noun_lemma if len(noun_lemma) <= len(verb_lemma) else verb_lemma
-                filtered_tokens.append(lemma)
-            else:
-                # No lemmatization available
-                filtered_tokens.append(word)
+        # Basic filtering
+        if len(word) < 3 or not word.isalpha():
+            continue
+
+        # Lemmatize if available
+        if lemmatizer:
+            # Try both noun and verb lemmatization for better results
+            noun_lemma = lemmatizer.lemmatize(word, pos='n')
+            verb_lemma = lemmatizer.lemmatize(word, pos='v')
+            # Use the shorter lemma (usually better)
+            lemma = noun_lemma if len(noun_lemma) <= len(verb_lemma) else verb_lemma
+        else:
+            lemma = word
+
+        # NOW check if lemma is stopword (after lemmatization)
+        if lemma not in english_stopwords:
+            filtered_tokens.append(lemma)
 
     tokens = filtered_tokens
     
@@ -216,21 +307,41 @@ def safe_pubmed_lookup(*args):
     return get_pubmed_id(*args)
 
 def find_cutoff_position(text):
-    pattern = r"\b(acknowledgments|works cited|notes|references)\b"
+    # Improved pattern - more comprehensive, case-insensitive
+    pattern = r"\b(references|bibliography|works cited|literature cited|" \
+              r"acknowledgments?|notes|endnotes|sources|cited works|" \
+              r"bibliographie|referencias|literatur)\b"
     lower_text = text.lower()
     matches = [match.start() for match in re.finditer(pattern, lower_text)]
 
     if not matches:
         return len(text)
 
-    return min(matches)
+    # Find matches only in last 40% of document (avoid false positives in intro)
+    cutoff_threshold = int(len(text) * 0.6)
+    valid_matches = [pos for pos in matches if pos >= cutoff_threshold]
+
+    if valid_matches:
+        return min(valid_matches)
+    return len(text)
 
 
 def clean_pdf_text(text):
+    # CRITICAL FIX: Remove in-text citations BEFORE other processing
+    # Remove citations like: (Smith et al., 2020) or (Jones & Brown, 2019)
+    text = re.sub(r'\([A-Z][a-zA-Z]+(?:\s+(?:et al\.|and|&)\s+[A-Z][a-zA-Z]+)*,?\s*\d{4}[a-z]?\)', ' ', text)
+    # Remove bracket citations like: [1], [1,2,3], [1-5]
+    text = re.sub(r'\[[0-9,\-\s]+\]', ' ', text)
+    # Remove citations like: Smith (2020) or Smith et al. (2020)
+    text = re.sub(r'\b[A-Z][a-zA-Z]+\s+(?:et al\.\s*)?\(\d{4}\)', ' ', text)
+
+    # Normalize whitespace
     text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"\d+", "", text)
+    # Remove standalone numbers
+    text = re.sub(r"\b\d+\b", " ", text)
     text = text.lower()
 
+    # Find and remove bibliography/references section
     cutoff_pos = find_cutoff_position(text)
 
     if cutoff_pos < len(text) * 0.9:
@@ -603,11 +714,46 @@ def analyze_hdp_task(file, form_data):
             tau=64.0             # Learning rate delay
         )
 
-        # Extract significant topics (filter weak/noise topics)
+        # Extract significant topics based on prevalence (not just word mass)
         all_topics = hdp_model.get_topics()
-        # Filter topics with meaningful word mass (not too strict)
-        significant_topic_indices = [i for i, t in enumerate(all_topics) if np.sum(t) > 0.5]
+
+        # Calculate topic prevalence (how much each topic is used across documents)
+        topic_prevalences = []
+        for topic_idx in range(len(all_topics)):
+            doc_topic_weights = []
+            for doc_bow in corpus:
+                doc_topic_dist = dict(hdp_model[doc_bow])
+                topic_weight = doc_topic_dist.get(topic_idx, 0.0)
+                doc_topic_weights.append(topic_weight)
+
+            avg_prevalence = np.mean(doc_topic_weights)
+            topic_prevalences.append((topic_idx, avg_prevalence))
+
+        # Sort by prevalence (descending) and keep only top topics
+        topic_prevalences.sort(key=lambda x: x[1], reverse=True)
+
+        # Dynamic threshold: keep top N topics based on corpus size
+        if pdf_count < 100:
+            max_topics_to_keep = 8
+        elif pdf_count < 1000:
+            max_topics_to_keep = 15
+        elif pdf_count < 5000:
+            max_topics_to_keep = 25
+        else:
+            max_topics_to_keep = 35
+
+        # Filter: (1) Top N by prevalence, (2) Must have prevalence > 1% of corpus
+        min_prevalence = 0.01
+        significant_topic_indices = []
+        for topic_idx, prevalence in topic_prevalences[:max_topics_to_keep]:
+            if prevalence > min_prevalence:
+                significant_topic_indices.append(topic_idx)
+
         num_active_topics = len(significant_topic_indices)
+
+        logger.info(f"HDP discovered {len(all_topics)} topics, keeping top {num_active_topics} by prevalence")
+        print(f"📊 HDP discovered {len(all_topics)} topics → keeping top {num_active_topics} (prevalence > {min_prevalence:.1%})")
+
 
         if num_active_topics == 0:
             return {"error": "HDP model training failed. No significant topics generated."}
@@ -697,10 +843,18 @@ def analyze_hdp_task(file, form_data):
             
             # Prepare topic-word distributions for export (same format as LDA)
             topic_word_prob = {}
-            # Normalize HDP topic-word distribution
-            # gensim's get_topics() also returns unnormalized distributions
+            # Get topic-word distribution
             topic_dist = all_topics[topic_idx]
-            normalized_topic_dist = topic_dist / topic_dist.sum()
+
+            # FIX: Only normalize if not already normalized
+            # gensim's get_topics() may or may not return normalized distributions
+            dist_sum = topic_dist.sum()
+            if dist_sum > 0 and not np.isclose(dist_sum, 1.0, rtol=1e-3):
+                # Not normalized, so normalize it
+                normalized_topic_dist = topic_dist / dist_sum
+            else:
+                # Already normalized or empty
+                normalized_topic_dist = topic_dist
 
             for word_idx, word in enumerate(feature_names):
                 if word_idx < len(normalized_topic_dist):
@@ -860,11 +1014,11 @@ def analyze_task(file, form_data):
                     processed_text = preprocess_text(cleaned_text)
                     if processed_text:  # Only add if preprocessing successful
                         pdf_texts.append(processed_text)
-                    author, year, title = extract_metadata(file_name)
-                    authors.append(author)
-                    years.append(year)
-                    titles.append(title)
-                    pdf_count += 1
+                        author, year, title = extract_metadata(file_name)
+                        authors.append(author)
+                        years.append(year)
+                        titles.append(title)
+                        pdf_count += 1
         if not pdf_texts:
             return {"error": "No valid text extracted from PDFs."}
         # Fix vectorizer_params to match actual values
