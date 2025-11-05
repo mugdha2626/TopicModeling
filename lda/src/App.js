@@ -96,7 +96,7 @@ const ModelSelection = ({ modelType, setModelType }) => (
           onChange={(e) => setModelType(e.target.value)}
           style={styles.radioInput}
         />
-        <span style={styles.modelLabel}>HDP (Hierarchical Dirichlet Process)</span>
+        <span style={styles.modelLabels}>HDP (Hierarchical Dirichlet Process)</span>
         <HelpTooltip text="Automatic topic discovery: No need to specify topic count. Better for exploratory analysis." />
       </label>
     </div>

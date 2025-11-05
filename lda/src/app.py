@@ -697,9 +697,14 @@ def analyze_hdp_task(file, form_data):
             
             # Prepare topic-word distributions for export (same format as LDA)
             topic_word_prob = {}
+            # Normalize HDP topic-word distribution
+            # gensim's get_topics() also returns unnormalized distributions
+            topic_dist = all_topics[topic_idx]
+            normalized_topic_dist = topic_dist / topic_dist.sum()
+
             for word_idx, word in enumerate(feature_names):
-                if word_idx < len(all_topics[topic_idx]):
-                    prob = all_topics[topic_idx][word_idx]
+                if word_idx < len(normalized_topic_dist):
+                    prob = normalized_topic_dist[word_idx]
                     if prob > 1e-10:  # Only include meaningful probabilities
                         topic_word_prob[word] = float(prob)
             
@@ -787,10 +792,10 @@ def analyze_hdp_task(file, form_data):
             "average_lift_per_topic": [1.0] * int(num_active_topics),  # Placeholder for compatibility
             "model_loss": 0.0,  # HDP doesn't have direct loss equivalent
             "vectorizer_params": {
-                "max_df": 0.7,
-                "min_df": int(max(2, pdf_count // 10)),
+                "max_df": 0.6,
+                "min_df": int(max(2, pdf_count // 50)),
                 "stopwords_count": int(len(all_stopwords)),
-                "max_features": int(min(500, pdf_count * 50))
+                "max_features": max_features  # Dynamic based on corpus size
             }
         }
 
@@ -1032,8 +1037,13 @@ def analyze_task(file, form_data):
         topic_word_distributions = []
         for topic_idx in range(lda.n_components):
             topic_word_prob = {}
+            # Normalize the topic-word distribution to get proper probabilities
+            # sklearn's lda.components_ contains unnormalized pseudo-counts
+            topic_word_dist = lda.components_[topic_idx]
+            normalized_dist = topic_word_dist / topic_word_dist.sum()
+
             for word_idx, word in enumerate(feature_names):
-                prob = lda.components_[topic_idx, word_idx]
+                prob = normalized_dist[word_idx]
                 if prob > 1e-10:  # Only include words with meaningful probability
                     topic_word_prob[word] = float(prob)
             topic_word_distributions.append({
