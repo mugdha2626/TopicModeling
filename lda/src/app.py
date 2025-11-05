@@ -72,16 +72,17 @@ logging.getLogger("PyPDF2").setLevel(logging.ERROR)
 # Enhanced stopwords for academic/research papers
 # These are applied in addition to NLTK stopwords to filter generic academic and research terms
 ENHANCED_STOPWORDS = {
-    # Academic/research stopwords
+    # Academic/research structural words (truly generic across all fields)
     'study', 'research', 'studies', 'analysis', 'results', 'method', 'methods',
-    'data', 'table', 'figure', 'findings', 'conclusion', 'abstract', 'introduction',
+    'table', 'figure', 'findings', 'conclusion', 'abstract', 'introduction',
     'discussion', 'participants', 'participant', 'experiment', 'experiments',
     'university', 'doi', 'journal', 'published', 'authors', 'author', 'using', 'used',
     'show', 'shown', 'shows', 'may', 'also', 'however', 'therefore', 'thus',
+    'furthermore', 'moreover', 'additionally', 'meanwhile', 'nonetheless',
 
-    # Generic quantitative/analytical terms
+    # Generic quantitative terms (not domain-specific)
     'number', 'value', 'values', 'result', 'different', 'time', 'times',
-    'system', 'systems', 'process', 'based', 'two', 'one', 'three', 'first',
+    'based', 'two', 'one', 'three', 'four', 'five', 'first',
     'second', 'third', 'can', 'use', 'within', 'across', 'between', 'among',
     'well', 'large', 'small', 'high', 'low', 'new', 'different', 'same',
     'specific', 'general', 'particular', 'example', 'examples', 'case', 'cases',
@@ -89,19 +90,23 @@ ENHANCED_STOPWORDS = {
     'related', 'associated', 'compared', 'due', 'examined', 'found',
     'increased', 'decreased', 'range', 'level', 'levels', 'term', 'terms',
 
-    # Additional generic/structural terms that should be filtered
-    'condition', 'conditions', 'policy', 'policies', 'object', 'objects',
-    'algorithm', 'algorithms', 'task', 'tasks', 'mode', 'modes', 'action', 'actions',
-    'equation', 'equations', 'reason', 'reasons', 'visual', 'visually',
-    'lemma', 'lemmas', 'association', 'associations', 'knowledge',
-    'together', 'factor', 'factors', 'refer', 'refers', 'optimal', 'optimally',
-    'image', 'images', 'model', 'models', 'function', 'functions',
+    # Additional truly generic terms
+    'condition', 'conditions', 'reason', 'reasons',
+    'together', 'factor', 'factors', 'refer', 'refers',
     'approach', 'approaches', 'technique', 'techniques', 'problem', 'problems',
-    'solution', 'solutions', 'parameter', 'parameters', 'variable', 'variables',
-    'measure', 'measures', 'performance', 'evaluation', 'metric', 'metrics',
-    'assumption', 'assumptions', 'metal', 'metals', 'plan', 'plans', 'speak', 'speaking',
-    'qwen', 'control', 'controls', 'effect', 'effects', 'change', 'changes'
+    'solution', 'solutions', 'measure', 'measures',
+    'assumption', 'assumptions', 'plan', 'plans', 'speak', 'speaking',
+    'qwen', 'effect', 'effects', 'change', 'changes',
+
+    # Words that are TOO generic even in CS (appear everywhere)
+    'system', 'systems', 'process', 'method', 'methods', 'data'
 }
+
+# NOTE: Removed domain-specific CS/ML terms from stopwords that should be kept:
+# - algorithm, model, function, image, task, object
+# - parameter, variable, performance, metric, evaluation
+# - optimal, control, visual, equation
+# These are meaningful topic indicators in CS/ML/AI papers!
 
 def preprocess_text(text):
     """
@@ -535,12 +540,23 @@ def analyze_hdp_task(file, form_data):
             return {"error": "No valid text extracted from PDFs."}
 
         # Create document-term matrix with HDP-optimized parameters
+        # Scale vocabulary size based on corpus size
+        if pdf_count < 50:
+            max_features = 1000  # Small corpus: moderate vocabulary
+        elif pdf_count < 500:
+            max_features = 2500  # Medium corpus: larger vocabulary
+        else:
+            max_features = 5000  # Large corpus: extensive vocabulary
+
+        logger.info(f"Vocabulary scaling: {pdf_count} documents → max_features={max_features}")
+        print(f"📚 Vocabulary size: {max_features} words (scaled for {pdf_count} documents)")
+
         vectorizer = CountVectorizer(
-            max_df=0.7,           # More restrictive for HDP
-            min_df=max(2, pdf_count // 10),  # Scale with corpus size
+            max_df=0.6,           # Exclude words in >60% of docs (more restrictive for academic papers)
+            min_df=max(2, pdf_count // 50),  # Require words in at least 2% of docs (was 10%, now more lenient)
             stop_words=all_stopwords,
             token_pattern=r'\b[a-zA-Z]{4,}\b',  # Longer words for better quality
-            max_features=min(500, pdf_count * 50),  # Scale vocabulary with corpus
+            max_features=max_features,  # Scaled vocabulary based on corpus size
         )
         
         doc_term_matrix = vectorizer.fit_transform(pdf_texts)
@@ -551,15 +567,37 @@ def analyze_hdp_task(file, form_data):
 
         # Train HDP model
         # HDP automatically discovers the number of topics
-        # T and K control the truncation levels (should allow reasonable topic discovery)
+        # T and K control the truncation levels
+        # Scale T and gamma based on corpus size to prevent topic explosion
+
+        if pdf_count < 50:
+            # Small corpus: limit topics aggressively
+            T = 15
+            gamma_scaled = 0.5
+        elif pdf_count < 500:
+            # Medium corpus: moderate topic limit
+            T = 30
+            gamma_scaled = 0.3
+        elif pdf_count < 5000:
+            # Large corpus: allow more topics but lower gamma
+            T = 50
+            gamma_scaled = 0.1
+        else:
+            # Very large corpus: highest limit but lowest gamma
+            T = 75
+            gamma_scaled = 0.05
+
+        logger.info(f"HDP scaling: {pdf_count} documents → T={T}, gamma={gamma_scaled}")
+        print(f"\n📊 HDP Auto-scaling: {pdf_count} documents → T={T}, gamma={gamma_scaled}")
+
         hdp_model = HdpModel(
             corpus=corpus,
             id2word=dictionary,
             random_state=42,
-            alpha=alpha,         # Document-topic concentration (default 1.0)
-            gamma=1.0,           # Topic-level concentration (higher = more topics, default 1.0)
+            alpha=alpha,         # Document-topic concentration (from user input, default 0.1)
+            gamma=gamma_scaled,  # Topic-level concentration (scaled by corpus size)
             eta=0.01,            # Topic-word concentration (sparsity in word distribution)
-            T=150,               # First-level truncation (upper bound, should be generous)
+            T=T,                 # First-level truncation (scaled by corpus size)
             K=15,                # Second-level truncation (max topics per document)
             kappa=0.75,          # Learning rate decay
             tau=64.0             # Learning rate delay
