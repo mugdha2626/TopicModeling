@@ -317,12 +317,21 @@ def find_cutoff_position(text):
     if not matches:
         return len(text)
 
-    # Find matches only in last 40% of document (avoid false positives in intro)
-    cutoff_threshold = int(len(text) * 0.6)
+    # FIXED: Look for matches in last 60% of document (many refs sections start at 40-60%)
+    # This avoids false positives like "references to prior work" in intro
+    cutoff_threshold = int(len(text) * 0.4)
     valid_matches = [pos for pos in matches if pos >= cutoff_threshold]
 
     if valid_matches:
         return min(valid_matches)
+
+    # Fallback: if no matches after 40%, but we have matches earlier,
+    # and the last match is after 30% of doc, it's probably valid
+    if matches:
+        last_match = max(matches)
+        if last_match >= int(len(text) * 0.3):
+            return last_match
+
     return len(text)
 
 
