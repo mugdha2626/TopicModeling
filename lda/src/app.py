@@ -10,7 +10,7 @@ from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import CountVectorizer
 from gensim import corpora
-from gensim.models import HdpModel
+from gensim.models import HdpModel, CoherenceModel
 from nltk.corpus import stopwords
 import nltk
 import re
@@ -34,6 +34,7 @@ import time
 
 # Import comparison utilities
 from comparison_utils import (
+    calculate_tvd,
     calculate_optimal_transport_distance,
     calculate_best_match_metrics,
     bootstrap_ot_distance,
@@ -450,6 +451,39 @@ def prepare_gensim_corpus(doc_term_matrix, vectorizer):
     dictionary = corpora.Dictionary.from_corpus(corpus, id2word=id2word)
     return corpus, dictionary
 
+def calculate_topic_diversity(topics, num_words=10):
+    """Calculate topic diversity: proportion of unique words across all topics' top-N words.
+    1.0 = all topics have completely distinct words, 0 = all topics share the same words."""
+    all_top_words = []
+    for topic in topics:
+        words = topic.get("words", [])[:num_words]
+        all_top_words.extend(words)
+    if not all_top_words:
+        return 0.0
+    return len(set(all_top_words)) / len(all_top_words)
+
+
+def calculate_coherence_scores(topic_word_lists, texts, dictionary, coherence='c_v'):
+    """Calculate per-topic and average coherence scores using gensim CoherenceModel.
+    topic_word_lists: list of lists of top words per topic
+    texts: list of tokenized documents (list of list of strings)
+    dictionary: gensim Dictionary
+    """
+    try:
+        cm = CoherenceModel(
+            topics=topic_word_lists,
+            texts=texts,
+            dictionary=dictionary,
+            coherence=coherence
+        )
+        per_topic = cm.get_coherence_per_topic()
+        avg_coherence = float(cm.get_coherence())
+        return avg_coherence, [float(c) for c in per_topic]
+    except Exception as e:
+        logger.warning("Could not calculate coherence: %s", str(e))
+        return None, None
+
+
 def create_hdp_comprehensive_visualizations(hdp_model, dictionary, topic_info, num_words=10):
     """Create comprehensive HDP visualizations like gen.py"""
     charts = {}
@@ -672,10 +706,10 @@ def analyze_hdp_task(file, form_data):
         print(f"📚 Vocabulary size: {max_features} words (scaled for {pdf_count} documents)")
 
         vectorizer = CountVectorizer(
-            max_df=0.6,           # Exclude words in >60% of docs (more restrictive for academic papers)
-            min_df=max(2, pdf_count // 50),  # Require words in at least 2% of docs (was 10%, now more lenient)
+            max_df=0.7,           # Exclude words in >70% of docs (aligned with LDA)
+            min_df=max(2, pdf_count // 50),  # Require words in at least 2% of docs
             stop_words=all_stopwords,
-            token_pattern=r'\b[a-zA-Z]{4,}\b',  # Longer words for better quality
+            token_pattern=r'\b[a-zA-Z]{3,}\b',  # 3+ letter words (aligned with LDA)
             max_features=max_features,  # Scaled vocabulary based on corpus size
         )
         
@@ -934,6 +968,27 @@ def analyze_hdp_task(file, form_data):
                 "prevalence": prevalence
             })
 
+        # Calculate coherence and diversity for HDP
+        hdp_topic_word_lists = []
+        for i, topic_idx in enumerate(significant_topic_indices):
+            topic_words_list = [word for word, prob in hdp_model.show_topic(topic_idx, topn=num_words)]
+            hdp_topic_word_lists.append(topic_words_list)
+
+        tokenized_texts = [text.split() for text in pdf_texts]
+        coherence_score, per_topic_coherence = calculate_coherence_scores(
+            hdp_topic_word_lists, tokenized_texts, dictionary, coherence='c_v'
+        )
+        topic_diversity = calculate_topic_diversity(topics, num_words)
+
+        if coherence_score is not None:
+            print(f"\n📊 COHERENCE & DIVERSITY METRICS:")
+            print(f"   Average coherence (c_v): {coherence_score:.4f}")
+            for i, c in enumerate(per_topic_coherence):
+                print(f"   Topic {i+1} coherence: {c:.4f}")
+            print(f"   Topic diversity: {topic_diversity:.4f}")
+        else:
+            print("   ⚠️ Could not calculate coherence scores")
+
         return {
             "topics": topics,
             "topic_charts": topic_charts,
@@ -952,13 +1007,16 @@ def analyze_hdp_task(file, form_data):
             "topic_word_distributions": topic_word_distributions,
             "topic_prevalence": topic_prevalence,
             "vocabulary": feature_names.tolist(),
-            "average_lift_per_topic": [1.0] * int(num_active_topics),  # Placeholder for compatibility
-            "model_loss": 0.0,  # HDP doesn't have direct loss equivalent
+            "average_lift_per_topic": [1.0] * int(num_active_topics),
+            "model_loss": coherence_score if coherence_score is not None else 0.0,
+            "coherence_score": coherence_score,
+            "per_topic_coherence": per_topic_coherence,
+            "topic_diversity": topic_diversity,
             "vectorizer_params": {
-                "max_df": 0.6,
+                "max_df": 0.7,
                 "min_df": int(max(2, pdf_count // 50)),
                 "stopwords_count": int(len(all_stopwords)),
-                "max_features": max_features  # Dynamic based on corpus size
+                "max_features": max_features
             }
         }
 
@@ -1030,20 +1088,27 @@ def analyze_task(file, form_data):
                         pdf_count += 1
         if not pdf_texts:
             return {"error": "No valid text extracted from PDFs."}
-        # Fix vectorizer_params to match actual values
+        # Scale vocabulary size based on corpus size (matches HDP approach)
+        if pdf_count < 50:
+            lda_max_features = 1000
+        elif pdf_count < 500:
+            lda_max_features = 2000
+        else:
+            lda_max_features = 3000
+
         vectorizer_params = {
-                "max_df": 0.85,
+                "max_df": 0.7,
                 "min_df": 2,
                 "stopwords_count": len(all_stopwords),
-                "max_features": 1000
+                "max_features": lda_max_features
             }
         # Use CountVectorizer instead of TfidfVectorizer for better LDA performance
         vectorizer = CountVectorizer(
-            max_df=0.85,  # Exclude words appearing in >85% of documents
+            max_df=0.7,   # Exclude words appearing in >70% of documents
             min_df=2,     # Require words to appear in at least 2 documents
             stop_words=all_stopwords,
             token_pattern=r'\b[a-zA-Z]{3,}\b',  # Only words with 3+ letters
-            max_features=1000,  # Limit vocabulary size
+            max_features=lda_max_features,  # Corpus-scaled vocabulary size
         )
         doc_term_matrix = vectorizer.fit_transform(pdf_texts)
         feature_names = vectorizer.get_feature_names_out()
@@ -1051,12 +1116,12 @@ def analyze_task(file, form_data):
         # Train LDA model
         # Improved LDA parameters for better topic quality
         lda = LDA(
-            n_components=num_topics, 
+            n_components=num_topics,
             random_state=42,
-            doc_topic_prior=1.0/num_topics,  # Alpha - lower values encourage documents to focus on fewer topics
+            doc_topic_prior=0.1/num_topics,  # Alpha - sparse prior; academic papers focus on 1-2 topics
             topic_word_prior=0.01,  # Beta - lower values encourage topics to focus on fewer words
             learning_method='batch',
-            max_iter=50,
+            max_iter=200,
             evaluate_every=10,
             perp_tol=1e-3
         )
@@ -1065,7 +1130,12 @@ def analyze_task(file, form_data):
         if lda.components_.shape[0] == 0:
             return {"error": "LDA model training failed. No topics generated."}
 
-        logger.debug("Trained LDA model with %s topics", lda.n_components)
+        converged = lda.n_iter_ < 200
+        if not converged:
+            logger.warning("LDA did not converge within 200 iterations")
+            print("⚠️  WARNING: LDA did not converge within 200 iterations. Results may be suboptimal.")
+
+        logger.debug("Trained LDA model with %s topics (converged: %s)", lda.n_components, converged)
         
         # Print detailed model evaluation for user analysis
         print("\n" + "="*80)
@@ -1195,7 +1265,31 @@ def analyze_task(file, form_data):
         print(f"      - min_df: {vectorizer.min_df}")
         print(f"      - Stopwords count: {len(all_stopwords)}")
         print("="*80)
-        
+
+        # Calculate topic coherence (c_v) and diversity
+        topic_word_lists = []
+        for topic_idx in range(lda.n_components):
+            top_indices = components[topic_idx].argsort()[-num_words:][::-1]
+            topic_word_lists.append([feature_names[i] for i in top_indices])
+
+        # Build gensim corpus/dictionary for coherence calculation
+        tokenized_texts = [text.split() for text in pdf_texts]
+        corpus_gensim, dictionary_gensim = prepare_gensim_corpus(doc_term_matrix, vectorizer)
+
+        coherence_score, per_topic_coherence = calculate_coherence_scores(
+            topic_word_lists, tokenized_texts, dictionary_gensim, coherence='c_v'
+        )
+        topic_diversity = calculate_topic_diversity(topics, num_words)
+
+        if coherence_score is not None:
+            print(f"\n📊 COHERENCE & DIVERSITY METRICS:")
+            print(f"   Average coherence (c_v): {coherence_score:.4f}")
+            for i, c in enumerate(per_topic_coherence):
+                print(f"   Topic {i+1} coherence: {c:.4f}")
+            print(f"   Topic diversity: {topic_diversity:.4f}")
+        else:
+            print("   ⚠️ Could not calculate coherence scores")
+
         # Prepare topic-word probabilities for export
         topic_word_distributions = []
         for topic_idx in range(lda.n_components):
@@ -1250,6 +1344,10 @@ def analyze_task(file, form_data):
             "topic_word_distributions": topic_word_distributions,
             "topic_prevalence": topic_prevalence,
             "vocabulary": feature_names.tolist(),
+            "converged": converged,
+            "coherence_score": coherence_score,
+            "per_topic_coherence": per_topic_coherence,
+            "topic_diversity": topic_diversity,
         }
 
     except Exception as e:
@@ -1309,6 +1407,12 @@ def analyze():
                 "topic_word_distributions": result["topic_word_distributions"],
                 "topic_prevalence": result["topic_prevalence"],
                 "vocabulary": result["vocabulary"],
+                "converged": result.get("converged"),
+                "coherence_score": result.get("coherence_score"),
+                "per_topic_coherence": result.get("per_topic_coherence"),
+                "topic_diversity": result.get("topic_diversity"),
+                "vectorizer_params": result.get("vectorizer_params"),
+                "perplexity": result.get("perplexity"),
             }
         )
 
@@ -1356,7 +1460,10 @@ def analyze_hdp():
                 "vocabulary": result["vocabulary"],
                 "average_lift_per_topic": result["average_lift_per_topic"],
                 "model_loss": result["model_loss"],
-                "vectorizer_params": result["vectorizer_params"]
+                "vectorizer_params": result["vectorizer_params"],
+                "coherence_score": result.get("coherence_score"),
+                "per_topic_coherence": result.get("per_topic_coherence"),
+                "topic_diversity": result.get("topic_diversity"),
             }
         )
 
@@ -1435,36 +1542,6 @@ def generate_topic_distribution_charts(lda_model, feature_names, num_words=10):
     return topic_charts
 
 
-def calculate_tvd_similarity(topic_dist_1, topic_dist_2, vocabulary):
-    """
-    Calculate Total Variation Distance between two topic-word distributions.
-    TVD = 0.5 * sum(|P(w|topic1) - P(w|topic2)|) for all words w
-    Returns similarity matrix where 0 = identical, 1 = completely different
-    """
-    try:
-        # Create probability vectors for all words in vocabulary
-        prob_vector_1 = np.zeros(len(vocabulary))
-        prob_vector_2 = np.zeros(len(vocabulary))
-        
-        # Fill probability vectors
-        for i, word in enumerate(vocabulary):
-            prob_vector_1[i] = topic_dist_1.get(word, 0.0)
-            prob_vector_2[i] = topic_dist_2.get(word, 0.0)
-        
-        # Normalize to ensure they sum to 1 (LDA should already do this, but safety check)
-        if prob_vector_1.sum() > 0:
-            prob_vector_1 = prob_vector_1 / prob_vector_1.sum()
-        if prob_vector_2.sum() > 0:
-            prob_vector_2 = prob_vector_2 / prob_vector_2.sum()
-        
-        # Calculate TVD
-        tvd = 0.5 * np.sum(np.abs(prob_vector_1 - prob_vector_2))
-        return float(tvd)
-    
-    except Exception as e:
-        logger.error("TVD calculation error: %s", str(e))
-        return 1.0  # Return maximum distance on error
-
 @app.route("/compare", methods=["POST"])
 def compare_topics():
     """
@@ -1542,18 +1619,38 @@ def compare_topics():
                 'word_probs': word_probs
             }
 
-        # Get combined vocabulary
-        all_words = set(df1['Word'].unique()) | set(df2['Word'].unique())
+        # Get combined vocabulary and compute overlap statistics
+        vocab1 = set(df1['Word'].unique())
+        vocab2 = set(df2['Word'].unique())
+        shared_words = vocab1 & vocab2
+        all_words = vocab1 | vocab2
         vocabulary = list(all_words)
+        jaccard_similarity = len(shared_words) / len(all_words) if all_words else 0.0
+
+        vocabulary_overlap = {
+            'dataset1_unique': len(vocab1 - vocab2),
+            'dataset2_unique': len(vocab2 - vocab1),
+            'shared': len(shared_words),
+            'total_union': len(all_words),
+            'jaccard_similarity': round(jaccard_similarity, 4)
+        }
+
+        warnings = []
+        if jaccard_similarity < 0.3:
+            warnings.append(
+                f"Low vocabulary overlap (Jaccard={jaccard_similarity:.2f}). "
+                "TVD distances may be inflated due to many words appearing in only one dataset."
+            )
 
         # Print initial dataset info
         import sys
         print("\n" + "="*80, file=sys.stderr, flush=True)
         print("🔄 TOPIC COMPARISON ANALYSIS", file=sys.stderr, flush=True)
         print("="*80, file=sys.stderr, flush=True)
-        print(f"📊 Dataset 1: {len(topics1_list)} topics, {len(df1['Word'].unique())} unique words", file=sys.stderr, flush=True)
-        print(f"📊 Dataset 2: {len(topics2_list)} topics, {len(df2['Word'].unique())} unique words", file=sys.stderr, flush=True)
-        print(f"🔤 Combined vocabulary: {len(vocabulary)} unique words", file=sys.stderr, flush=True)
+        print(f"📊 Dataset 1: {len(topics1_list)} topics, {len(vocab1)} unique words", file=sys.stderr, flush=True)
+        print(f"📊 Dataset 2: {len(topics2_list)} topics, {len(vocab2)} unique words", file=sys.stderr, flush=True)
+        print(f"🔤 Shared vocabulary: {len(shared_words)} words (Jaccard: {jaccard_similarity:.2f})", file=sys.stderr, flush=True)
+        print(f"🔤 Union vocabulary: {len(vocabulary)} unique words", file=sys.stderr, flush=True)
         print(file=sys.stderr, flush=True)
 
         # Print topics from each dataset
@@ -1611,7 +1708,7 @@ def compare_topics():
         for i, (topic1_id, topic1_data) in enumerate(sorted(topics1_dict.items())):
             row_data = []
             for j, (topic2_id, topic2_data) in enumerate(sorted(topics2_dict.items())):
-                tvd = calculate_tvd_similarity(
+                tvd = calculate_tvd(
                     topic1_data['word_probs'],
                     topic2_data['word_probs'],
                     vocabulary
@@ -1636,7 +1733,12 @@ def compare_topics():
         ot_distance = calculate_optimal_transport_distance(
             topics1_list, topics2_list, prevalence1, prevalence2, vocabulary
         )
-        print(f"   ✅ OT Distance: {ot_distance:.4f}", file=sys.stderr, flush=True)
+        if ot_distance is None:
+            warnings.append("Optimal Transport distance could not be calculated. The POT library may not be installed.")
+            print("   ⚠️ OT Distance unavailable (POT library missing)", file=sys.stderr, flush=True)
+            ot_distance = 0.0
+        else:
+            print(f"   ✅ OT Distance: {ot_distance:.4f}", file=sys.stderr, flush=True)
         print(f"      (0 = identical, higher = more different)", file=sys.stderr, flush=True)
         print()
 
@@ -1798,7 +1900,9 @@ def compare_topics():
                     'dataset2_to_1': tvd_values_2to1
                 }
             },
-            'has_prevalence': prevalence_file1 is not None and prevalence_file2 is not None
+            'has_prevalence': prevalence_file1 is not None and prevalence_file2 is not None,
+            'vocabulary_overlap': vocabulary_overlap,
+            'warnings': warnings,
         }
 
         logger.info("Comparison complete. OT distance: %.4f", ot_distance if ot_distance else 0)

@@ -414,6 +414,38 @@ const App = () => {
           📉 Model Loss (NLL): {results?.model_loss?.toFixed(2) || 'N/A'}
           <br/><em>(Negative Log Likelihood, lower = better)</em>
         </li>
+        {results?.coherence_score != null && (
+          <li>
+            📊 Topic Coherence (c_v): <strong>{results.coherence_score.toFixed(4)}</strong>
+            <br/><em>(Higher is better; &gt;0.4 = good, &gt;0.55 = excellent)</em>
+            {results.per_topic_coherence && (
+              <ul>
+                {results.per_topic_coherence.map((c, i) => (
+                  <li key={i}>Topic {i + 1}: {c.toFixed(4)}</li>
+                ))}
+              </ul>
+            )}
+          </li>
+        )}
+        {results?.topic_diversity != null && (
+          <li>
+            🎯 Topic Diversity: <strong>{results.topic_diversity.toFixed(4)}</strong>
+            <br/><em>(1.0 = all unique words, 0 = identical topics)</em>
+          </li>
+        )}
+        {results?.converged != null && (
+          <li>
+            {results.converged ? '✅' : '⚠️'} Convergence: <strong>{results.converged ? 'Converged' : 'Did not converge'}</strong>
+            {!results.converged && <br/>}
+            {!results.converged && <em>Consider reducing topics or adding stopwords</em>}
+          </li>
+        )}
+        {results?.perplexity != null && (
+          <li>
+            📈 Perplexity: <strong>{results.perplexity.toFixed(2)}</strong>
+            <br/><em>(Lower is better)</em>
+          </li>
+        )}
       </ul>
     </div>
     </div>
@@ -1457,8 +1489,25 @@ const SimilarityHeatmap = ({ matrixData, topics1, topics2 }) => {
                   <li>Dataset 1: {comparisonResults.num_topics1} topics</li>
                   <li>Dataset 2: {comparisonResults.num_topics2} topics</li>
                   <li>Combined vocabulary: {comparisonResults.vocabulary_size} unique words</li>
+                  {comparisonResults.vocabulary_overlap && (
+                    <>
+                      <li>Shared words: {comparisonResults.vocabulary_overlap.shared} ({(comparisonResults.vocabulary_overlap.jaccard_similarity * 100).toFixed(1)}% Jaccard similarity)</li>
+                      <li>Dataset 1 unique words: {comparisonResults.vocabulary_overlap.dataset1_unique}</li>
+                      <li>Dataset 2 unique words: {comparisonResults.vocabulary_overlap.dataset2_unique}</li>
+                    </>
+                  )}
                   <li>Prevalence data: {comparisonResults.has_prevalence ? '✅ Provided' : '⚠️ Not provided (using uniform weights)'}</li>
                 </ul>
+                {comparisonResults.warnings && comparisonResults.warnings.length > 0 && (
+                  <div style={{background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '8px', padding: '10px', margin: '10px 0'}}>
+                    <strong>⚠️ Warnings:</strong>
+                    <ul style={{margin: '5px 0'}}>
+                      {comparisonResults.warnings.map((w, i) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
 
               {/* Optimal Transport Distance Display */}

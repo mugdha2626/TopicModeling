@@ -1,0 +1,31 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+._*
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Environment (may contain secrets/API keys)
+.env
+.env.local
+.env.*.local
+
+# Temp/uploads
+*.tmp
+/tmp/
+
+# Test data (downloaded PDFs)
+test_data/
