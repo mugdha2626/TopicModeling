@@ -1,218 +1,110 @@
-# Local Setup Instructions
+# PDF Topic Explorer
 
-## Prerequisites
+Topic modeling (LDA / HDP) for academic research papers. Upload a ZIP of PDFs, get topics, visualizations, and cross-corpus comparison.
 
-Before you begin, make sure you have the following installed on your system:
+---
 
-### Required Software:
-1. **Node.js** (version 14 or higher)
-   - Download from [nodejs.org](https://nodejs.org/)
-   - Verify installation: `node --version` and `npm --version`
+## Lab Computer Setup (Windows, From Scratch)
 
-2. **Python** (version 3.8 or higher)
-   - Download from [python.org](https://python.org/)
-   - Verify installation: `python3 --version` or `python --version`
+### Step 1: Install Git
+1. Go to https://git-scm.com/download/win
+2. Download and run the installer
+3. Use all default settings, click Next through everything
+4. When done, open **Git Bash** (search for it in Start menu — use this for all commands below)
 
-3. **Git**
-   - Download from [git-scm.com](https://git-scm.com/)
-   - Verify installation: `git --version`
+### Step 2: Install Python
+1. Go to https://www.python.org/downloads/
+2. Download Python 3.11 or 3.12
+3. **IMPORTANT: Check the box "Add Python to PATH"** before clicking Install
+4. Verify in Git Bash: `python --version`
 
-## Installation Steps
+### Step 3: Install Node.js
+1. Go to https://nodejs.org/
+2. Download the **LTS** version
+3. Run the installer with default settings
+4. Verify in Git Bash: `node --version`
 
-### Step 1: Clone the Repository
+### Step 4: Clone and Set Up
+Open **Git Bash** and run these one by one:
+
 ```bash
 git clone https://github.com/mugdha2626/TopicModeling.git
 cd TopicModeling/lda
-```
 
-### Step 2: Install Frontend Dependencies
-```bash
+# Install frontend
 npm install
-```
 
-### Step 3: Install Python Dependencies
-```bash
-# Create a virtual environment (recommended)
-python3 -m venv venv
-
-# Activate virtual environment
-# On macOS/Linux:
-source venv/bin/activate
-# On Windows:
-# venv\Scripts\activate
+# Set up Python environment
+python -m venv venv
+source venv/Scripts/activate
 
 # Install Python packages
 pip install -r requirements.txt
+
+# Download language data (one time only)
+python -c "import nltk; nltk.download('wordnet'); nltk.download('stopwords'); nltk.download('omw-1.4'); nltk.download('averaged_perceptron_tagger')"
 ```
 
-### Step 4: Download NLTK Data
-The application requires NLTK data. Run this Python script once:
-```bash
-python3 -c "
-import nltk
-nltk.download('punkt')
-nltk.download('stopwords')
-nltk.download('wordnet')
-nltk.download('omw-1.4')
-print('NLTK data downloaded successfully!')
-"
-```
-
-## Running the Application
-
-### Option 1: Run Both Frontend and Backend Together (Recommended)
+### Step 5: Run the App
 ```bash
 npm start
 ```
-This command will:
-- Start the Python Flask backend on `http://localhost:5001`
-- Start the React frontend on `http://localhost:3000`
-- Automatically open your browser to the application
 
-### Option 2: Run Frontend and Backend Separately
+Open `http://localhost:3000` in your browser.
 
-#### Terminal 1 - Start Backend:
-```bash
-npm run start-backend
-# OR manually:
-# python3 src/app.py
+> **If `npm start` doesn't work on Windows**, run frontend and backend in two separate Git Bash windows:
+> - Window 1: `source venv/Scripts/activate && python src/app.py`
+> - Window 2: `npm run start-frontend`
+
+---
+
+## How to Use
+
+1. Open `http://localhost:3000`
+2. Upload a **ZIP file** containing PDF research papers
+3. Pick **LDA** (you choose number of topics) or **HDP** (auto-discovers topics)
+4. Click **Analyze** and wait for results
+5. View topics, charts, and top papers per topic
+
+### PDF Naming Format
+For best metadata extraction, name your PDFs like:
+```
+Author et al. - 2023 - Title of the Paper.pdf
 ```
 
-#### Terminal 2 - Start Frontend:
-```bash
-npm run start-frontend
-# OR manually:
-# npm start
-```
+### Comparing Two Corpora
+1. Run analysis on corpus A, download the topic-word CSV from results
+2. Run analysis on corpus B, download the topic-word CSV from results
+3. Go to the **Compare** tab, upload both CSVs
+4. See OT distance, TVD heatmap, and best-match network
 
-## Using the Application
+---
 
-1. **Open your browser** to `http://localhost:3000`
-2. **Upload a ZIP file** containing PDF research papers
-3. **Configure analysis settings:**
-   - Number of topics (for LDA)
-   - Number of words per topic
-   - Additional stopwords (optional)
-4. **Choose model type:** LDA or HDP
-5. **Click "Analyze"** and wait for results
-6. **View results:** Topic charts, word distributions, and top papers
-
-## File Format Requirements
-
-### PDF Files in ZIP:
-Your ZIP file should contain PDF files named in this format:
+## Project Structure
 ```
-Author et al. - Year - Title.pdf
-```
-Example:
-```
-Smith et al. - 2023 - Machine Learning in Healthcare.pdf
-Johnson and Brown - 2022 - Climate Change Analysis.pdf
-```
-
-### Comparison Feature:
-If using the topic comparison feature, you'll need CSV files with this structure:
-```csv
-Topic_ID,Topic_Name,Word,Probability
-0,Topic 1,word1,0.1234
-0,Topic 1,word2,0.0987
-1,Topic 2,word3,0.1456
+TopicModeling/
+└── lda/
+    ├── src/
+    │   ├── App.js              # React frontend
+    │   ├── app.py              # Flask backend (LDA + HDP)
+    │   ├── preprocessing.py    # PDF text extraction + cleaning
+    │   ├── comparison_utils.py # TVD, Optimal Transport, stats
+    │   └── test_models.py      # Validation tests
+    ├── public/                 # Static assets
+    ├── package.json            # Node dependencies + scripts
+    └── requirements.txt        # Python dependencies
 ```
 
 ## Troubleshooting
 
-### Common Issues:
+**Port 5001 in use:** In Git Bash: `netstat -ano | findstr :5001` then `taskkill /PID <the_pid> /F`
 
-#### 1. Port Already in Use
-If you see "Port 5001 already in use":
-```bash
-# Kill process on port 5001
-lsof -ti:5001 | xargs kill -9
-# OR change port in src/app.py
-```
+**Python module not found:** Make sure venv is activated: `source venv/Scripts/activate`
 
-#### 2. Python Module Not Found
-```bash
-# Make sure virtual environment is activated
-source venv/bin/activate  # macOS/Linux
-# venv\Scripts\activate   # Windows
+**NLTK data missing:** `python -c "import nltk; nltk.download('all')"`
 
-# Reinstall requirements
-pip install -r requirements.txt
-```
-
-#### 3. NLTK Data Missing
-```bash
-python3 -c "
-import nltk
-nltk.download('all')
-"
-```
-
-#### 4. Node/NPM Issues
-```bash
-# Clear npm cache
-npm cache clean --force
-
-# Delete node_modules and reinstall
-rm -rf node_modules package-lock.json
-npm install
-```
-
-#### 5. CORS Issues
-If you see CORS errors in the browser console:
-- Make sure both frontend (port 3000) and backend (port 5001) are running
-- Check that the API URLs in the frontend are pointing to `localhost:5001`
+**Node issues:** `rm -rf node_modules && npm install`
 
 ## System Requirements
-
-- **RAM**: Minimum 8GB (16GB recommended for large document sets)
-- **Storage**: At least 2GB free space
-- **CPU**: Multi-core processor recommended for faster analysis
-
-## Development Notes
-
-### Project Structure:
-```
-TopicModeling/
-├── lda/
-│   ├── src/
-│   │   ├── App.js          # React frontend
-│   │   ├── app.py          # Flask backend
-│   │   └── comparison_utils.py
-│   ├── public/
-│   ├── build/              # Production build
-│   ├── package.json        # Node dependencies
-│   ├── requirements.txt    # Python dependencies
-│   └── vercel.json         # Deployment config
-└── README.md
-```
-
-### Environment Variables:
-- `REACT_APP_API_URL`: Backend URL (defaults to `http://localhost:5001`)
-
-### Available Scripts:
-- `npm start`: Run both frontend and backend
-- `npm run start-frontend`: Run only React app
-- `npm run start-backend`: Run only Python API
-- `npm run build`: Build production frontend
-- `npm test`: Run tests
-
-## Getting Help
-
-If you encounter issues:
-1. Check the terminal output for error messages
-2. Ensure all prerequisites are installed
-3. Verify that both ports 3000 and 5001 are available
-4. Check the browser console for frontend errors
-5. Review the Python console for backend errors
-
-## Features
-
-- **LDA Topic Modeling**: Traditional Latent Dirichlet Allocation
-- **HDP Topic Modeling**: Hierarchical Dirichlet Process (automatic topic discovery)
-- **Interactive Visualizations**: Bar charts, word clouds, topic distributions
-- **Topic Comparison**: Compare topic models between different document sets
-- **Paper Analysis**: Identify top papers for each topic
-- **Decade Analysis**: Track topic evolution over time periods
-- **Export Functionality**: Download results and visualizations
+- RAM: 8GB minimum, 16GB recommended for large corpora
+- Storage: 2GB free space
