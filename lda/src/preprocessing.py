@@ -63,6 +63,8 @@ ENHANCED_STOPWORDS = {
     'explore', 'explored', 'confirm', 'confirmed', 'establish', 'established',
     'conduct', 'conducted', 'publish', 'perform', 'obtain', 'select', 'selected',
     'apply', 'applied', 'test', 'tested', 'note', 'noted', 'aim', 'aimed',
+    'find', 'found', 'compare', 'increase', 'decrease', 'relate',
+    'correspond', 'correspond', 'support', 'supported', 'predict', 'predicted',
 
     # Generic quantitative/study terms
     'number', 'value', 'values', 'result', 'different', 'time', 'times',
@@ -75,6 +77,16 @@ ENHANCED_STOPWORDS = {
     'increased', 'decreased', 'range', 'level', 'levels', 'term', 'terms',
     'group', 'groups', 'sample', 'samples', 'control', 'controls',
     'region', 'regions', 'area', 'areas',
+    'individual', 'individuals', 'subject', 'subjects', 'patient', 'patients',
+    'mean', 'average', 'total', 'score', 'scores', 'percentage',
+    'manuscript', 'material', 'materials', 'see',
+    'base', 'back', 'like', 'given', 'take', 'taken',
+    'age', 'aged', 'male', 'female', 'sex', 'gender', 'year', 'years',
+    'model', 'models', 'response', 'responses',
+    'task', 'tasks', 'trial', 'trials', 'block', 'blocks',
+    'correlation', 'correlations', 'anova', 'regression', 'ttest',
+    'paired', 'baseline', 'standard', 'deviation', 'error', 'variance',
+    'image', 'images', 'contrast',
 
     # Additional generic terms
     'condition', 'conditions', 'reason', 'reasons',
@@ -203,6 +215,15 @@ def preprocess_text(text):
     except Exception:
         english_stopwords = set(ENHANCED_STOPWORDS)
 
+    # Add common short function words that slip through NLTK's list
+    english_stopwords.update({
+        'was', 'has', 'had', 'were', 'been', 'did', 'does', 'got',
+        'set', 'get', 'put', 'let', 'say', 'see', 'saw', 'run', 'ran',
+        'non', 'per', 'via', 'yet', 'far', 'may', 'also', 'well',
+        'www', 'http', 'https', 'org', 'com', 'edu', 'pdf', 'pmc',
+        'fig', 'tab', 'vol', 'ref', 'ect', 'etc',
+    })
+
     # Common word fragments from broken PDF hyphenation that slip through
     _FRAGMENTS = {
         'signi', 'cant', 'cantly', 'cation', 'ficant', 'tion', 'tial',
@@ -210,11 +231,26 @@ def preprocess_text(text):
         'ble', 'ally', 'ical', 'ated', 'ting', 'tions', 'ments',
         'sion', 'ence', 'ance', 'able', 'ible',
         'wa', 'ha', 'tho', 'thu', 'whi', 'ther',  # lemmatizer artifacts
+        'com', 'atr', 'lar', 'ter', 'pre', 'pro', 'dis', 'sub',  # common fragments
+    }
+
+    # Known 3-letter scientific acronyms worth keeping
+    _VALID_SHORT = {
+        'eeg', 'erp', 'meg', 'roi', 'fmr', 'pet', 'mri', 'dti', 'tms',
+        'pfc', 'acc', 'ica', 'svm', 'bci', 'emg', 'lfp', 'snr', 'bdd',
+        'vep', 'eog', 'ecg', 'roc', 'auc', 'cue', 'map', 'fly', 'eye',
+        'arm', 'leg', 'ear', 'jaw', 'lip', 'rib', 'hip', 'gut',  # body parts
     }
 
     filtered_tokens = []
     for word in tokens:
-        if len(word) < 3 or not word.isalpha():
+        if not word.isalpha():
+            continue
+
+        # For 3-char words: only keep known scientific acronyms
+        if len(word) <= 3:
+            if word in _VALID_SHORT:
+                filtered_tokens.append(word)
             continue
 
         # Skip likely word fragments (short tokens that look like suffixes)
@@ -222,16 +258,16 @@ def preprocess_text(text):
             continue
 
         if lemmatizer:
-            # Try all POS forms; prefer verb lemma (best at reducing conjugations),
-            # then pick shortest among the rest
-            verb_lemma = lemmatizer.lemmatize(word, pos='v')
-            if verb_lemma != word:
-                lemma = verb_lemma
-            else:
-                noun_lemma = lemmatizer.lemmatize(word, pos='n')
-                adj_lemma = lemmatizer.lemmatize(word, pos='a')
-                adv_lemma = lemmatizer.lemmatize(word, pos='r')
-                lemma = min([noun_lemma, adj_lemma, adv_lemma], key=len)
+            # Use verb lemma only for words with verb-like endings,
+            # to avoid "left" -> "leave", "right" -> "right" mismatches
+            noun_lemma = lemmatizer.lemmatize(word, pos='n')
+            adj_lemma = lemmatizer.lemmatize(word, pos='a')
+            adv_lemma = lemmatizer.lemmatize(word, pos='r')
+            candidates = [noun_lemma, adj_lemma, adv_lemma]
+            if word.endswith(('ed', 'ing', 'es', 'ates', 'ized', 'ised')):
+                verb_lemma = lemmatizer.lemmatize(word, pos='v')
+                candidates.append(verb_lemma)
+            lemma = min(candidates, key=len)
         else:
             lemma = word
 
