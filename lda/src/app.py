@@ -1093,8 +1093,10 @@ def analyze_task(file, form_data):
             lda_max_features = 1000
         elif pdf_count < 500:
             lda_max_features = 2000
+        elif pdf_count < 5000:
+            lda_max_features = 5000
         else:
-            lda_max_features = 3000
+            lda_max_features = 8000
 
         vectorizer_params = {
                 "max_df": 0.7,
@@ -1103,9 +1105,11 @@ def analyze_task(file, form_data):
                 "max_features": lda_max_features
             }
         # Use CountVectorizer instead of TfidfVectorizer for better LDA performance
+        # Scale min_df with corpus size: word must appear in enough docs to be meaningful
+        lda_min_df = max(2, pdf_count // 100)  # At least 1% of docs
         vectorizer = CountVectorizer(
             max_df=0.7,   # Exclude words appearing in >70% of documents
-            min_df=2,     # Require words to appear in at least 2 documents
+            min_df=lda_min_df,
             stop_words=all_stopwords,
             token_pattern=r'\b[a-zA-Z]{3,}\b',  # Only words with 3+ letters
             max_features=lda_max_features,  # Corpus-scaled vocabulary size
