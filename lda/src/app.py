@@ -11,9 +11,7 @@ from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import CountVectorizer
 from gensim import corpora
 from gensim.models import HdpModel, CoherenceModel
-from nltk.corpus import stopwords
 import nltk
-import re
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PyPDF2 import PdfReader
@@ -25,6 +23,11 @@ from Bio import Entrez
 import time
 import seaborn as sns
 from wordcloud import WordCloud
+from preprocessing import (
+    ENHANCED_STOPWORDS, preprocess_text, extract_text_from_pdf,
+    clean_pdf_text, find_cutoff_position, prepare_gensim_corpus,
+    extract_metadata, get_all_stopwords
+)
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -74,216 +77,11 @@ except Exception as e:
 
 logging.getLogger("PyPDF2").setLevel(logging.ERROR)
 
-# Enhanced stopwords for academic/research papers
-# These are applied in addition to NLTK stopwords to filter generic academic and research terms
-ENHANCED_STOPWORDS = {
-    # Academic/research structural words (truly generic across all fields)
-    'study', 'research', 'studies', 'analysis', 'results', 'method', 'methods',
-    'table', 'figure', 'findings', 'conclusion', 'abstract', 'introduction',
-    'discussion', 'participants', 'participant', 'experiment', 'experiments',
-    'university', 'doi', 'journal', 'published', 'authors', 'author', 'using', 'used',
-    'show', 'shown', 'shows', 'may', 'also', 'however', 'therefore', 'thus',
-    'furthermore', 'moreover', 'additionally', 'meanwhile', 'nonetheless',
 
-    # Generic quantitative terms (not domain-specific)
-    'number', 'value', 'values', 'result', 'different', 'time', 'times',
-    'based', 'two', 'one', 'three', 'four', 'five', 'first',
-    'second', 'third', 'can', 'use', 'within', 'across', 'between', 'among',
-    'well', 'large', 'small', 'high', 'low', 'new', 'different', 'same',
-    'specific', 'general', 'particular', 'example', 'examples', 'case', 'cases',
-    'significant', 'observed', 'obtained', 'performed', 'present',
-    'related', 'associated', 'compared', 'due', 'examined', 'found',
-    'increased', 'decreased', 'range', 'level', 'levels', 'term', 'terms',
+# ENHANCED_STOPWORDS, preprocess_text, extract_text_from_pdf, clean_pdf_text,
+# find_cutoff_position, prepare_gensim_corpus, extract_metadata, get_all_stopwords
+# are all imported from preprocessing.py
 
-    # Additional truly generic terms
-    'condition', 'conditions', 'reason', 'reasons',
-    'together', 'factor', 'factors', 'refer', 'refers',
-    'approach', 'approaches', 'technique', 'techniques', 'problem', 'problems',
-    'solution', 'solutions', 'measure', 'measures',
-    'assumption', 'assumptions', 'plan', 'plans', 'speak', 'speaking',
-    'qwen', 'effect', 'effects', 'change', 'changes',
-
-    # Words that are TOO generic even in CS (appear everywhere)
-    'system', 'systems', 'process', 'method', 'methods', 'data',
-
-    # Common place names (often appear in author affiliations)
-    'germany', 'london', 'york', 'california', 'missouri', 'china', 'italy',
-    'france', 'england', 'boston', 'chicago', 'amsterdam', 'oxford', 'cambridge',
-    'stanford', 'harvard', 'princeton', 'berkeley', 'toronto', 'montreal',
-    'manchester', 'edinburgh', 'glasgow', 'dublin', 'paris', 'berlin', 'munich',
-    'tokyo', 'korea', 'japan', 'australia', 'sydney', 'melbourne', 'canada',
-
-    # Common surnames (often from author names leaking into text)
-    'smith', 'johnson', 'williams', 'brown', 'jones', 'miller', 'davis',
-    'wilson', 'moore', 'taylor', 'anderson', 'thomas', 'jackson', 'white',
-    'harris', 'martin', 'thompson', 'garcia', 'martinez', 'robinson',
-    'clark', 'rodriguez', 'lewis', 'lee', 'walker', 'hall', 'allen',
-    'young', 'hernandez', 'king', 'wright', 'lopez', 'hill', 'scott',
-    'green', 'adams', 'baker', 'gonzalez', 'nelson', 'carter', 'mitchell',
-    'perez', 'roberts', 'turner', 'phillips', 'campbell', 'parker', 'evans',
-    'edwards', 'collins', 'stewart', 'sanchez', 'morris', 'rogers', 'reed',
-    'cook', 'morgan', 'bell', 'murphy', 'bailey', 'rivera', 'cooper',
-    'richardson', 'cox', 'howard', 'ward', 'torres', 'peterson', 'gray',
-    'ramirez', 'james', 'watson', 'brooks', 'kelly', 'sanders', 'price',
-    'bennett', 'wood', 'barnes', 'ross', 'henderson', 'coleman', 'jenkins',
-    'perry', 'powell', 'long', 'patterson', 'hughes', 'flores', 'washington',
-    'butler', 'simmons', 'foster', 'gonzales', 'bryant', 'alexander', 'russell',
-    'griffin', 'diaz', 'hayes', 'myers', 'ford', 'hamilton', 'graham', 'sullivan',
-    'wallace', 'woods', 'cole', 'west', 'jordan', 'owens', 'reynolds', 'fisher',
-    'ellis', 'harrison', 'gibson', 'mcdonald', 'cruz', 'marshall', 'ortiz',
-    'gomez', 'murray', 'freeman', 'wells', 'webb', 'simpson', 'stevens',
-    'tucker', 'porter', 'hunter', 'hicks', 'crawford', 'henry', 'boyd',
-    'mason', 'morales', 'kennedy', 'warren', 'dixon', 'ramos', 'reyes',
-    'burns', 'gordon', 'shaw', 'holmes', 'rice', 'robertson', 'hunt',
-    'black', 'daniels', 'palmer', 'mills', 'nichols', 'grant', 'knight',
-    'ferguson', 'rose', 'stone', 'hawkins', 'dunn', 'perkins', 'hudson',
-    'spencer', 'gardner', 'stephens', 'payne', 'pierce', 'berry', 'matthews',
-    'arnold', 'wagner', 'willis', 'ray', 'watkins', 'olson', 'carroll',
-    'duncan', 'snyder', 'hart', 'cunningham', 'bradley', 'lane', 'andrews',
-    'ruiz', 'harper', 'fox', 'riley', 'armstrong', 'carpenter', 'weaver',
-    'greene', 'lawrence', 'elliott', 'chavez', 'sims', 'austin', 'peters',
-    'kelley', 'franklin', 'lawson', 'fields', 'gutierrez', 'ryan', 'schmidt',
-    'carr', 'vasquez', 'castillo', 'wheeler', 'chapman', 'oliver', 'montgomery',
-    'richards', 'williamson', 'johnston', 'banks', 'meyer', 'bishop', 'mccoy',
-    'howell', 'alvarez', 'morrison', 'hansen', 'fernandez', 'garza', 'harvey',
-    'little', 'burton', 'stanley', 'nguyen', 'george', 'jacobs', 'reid',
-    'kim', 'fuller', 'lynch', 'dean', 'gilbert', 'garrett', 'romero',
-    'welch', 'larson', 'frazier', 'burke', 'hanson', 'day', 'mendoza',
-    'moreno', 'bowman', 'medina', 'fowler', 'brewer', 'hoffman', 'carlson',
-    'silva', 'pearson', 'holland', 'douglas', 'fleming', 'jensen', 'vargas',
-    'byrd', 'davidson', 'hopkins', 'may', 'terry', 'herrera', 'wade',
-    'soto', 'walters', 'curtis', 'neal', 'caldwell', 'lowe', 'jennings',
-    'barnett', 'graves', 'jimenez', 'horton', 'shelton', 'barrett', 'obrien',
-    'castro', 'sutton', 'gregory', 'mckinney', 'lucas', 'miles', 'craig',
-    'rodriquez', 'chambers', 'holt', 'lambert', 'fletcher', 'watts', 'bates',
-    'hale', 'rhodes', 'pena', 'beck', 'newman', 'haynes', 'mcdaniel',
-    'mendez', 'bush', 'vaughn', 'parks', 'dawson', 'santiago', 'norris',
-    'hardy', 'love', 'steele', 'curry', 'powers', 'schultz', 'barker',
-    'guzman', 'page', 'munoz', 'ball', 'keller', 'chandler', 'weber',
-    'leonard', 'walsh', 'lyons', 'ramsey', 'wolfe', 'schneider', 'mullins',
-    'benson', 'sharp', 'bowen', 'daniel', 'barber', 'cummings', 'hines',
-    'baldwin', 'griffith', 'valdez', 'hubbard', 'salazar', 'reeves', 'warner',
-    'stevenson', 'burgess', 'santos', 'tate', 'cross', 'garner', 'mann',
-    'mack', 'moss', 'thornton', 'dennis', 'mcgee', 'farmer', 'delgado',
-    'aguilar', 'vega', 'glover', 'manning', 'cohen', 'harmon', 'rodgers',
-    'robbins', 'newton', 'todd', 'blair', 'higgins', 'ingram', 'reese',
-    'cannon', 'strickland', 'townsend', 'potter', 'goodwin', 'walton',
-    'rowe', 'hampton', 'ortega', 'patton', 'swanson', 'joseph', 'francis',
-    'goodman', 'maldonado', 'yates', 'becker', 'erickson', 'hodges',
-    'rios', 'conner', 'adkins', 'webster', 'norman', 'malone', 'hammond',
-    'flowers', 'cobb', 'moody', 'quinn', 'blake', 'maxwell', 'pope',
-    'floyd', 'osborne', 'paul', 'mccarthy', 'guerrero', 'lindsey', 'estrada',
-    'sandoval', 'gibbs', 'tyler', 'gross', 'fitzgerald', 'stokes', 'doyle',
-    'sherman', 'saunders', 'wise', 'colon', 'gill', 'alvarado', 'greer',
-    'padilla', 'simon', 'waters', 'nunez', 'ballard', 'schwartz', 'mcbride',
-
-    # Academic metadata terms that leak through
-    'pmcid', 'pubmed', 'doi', 'issn', 'isbn', 'copyright', 'license',
-    'elsevier', 'springer', 'wiley', 'pergamon', 'press', 'publisher', 'publication',
-
-    # Common affiliation/institutional words
-    'department', 'university', 'college', 'institute', 'school', 'center',
-    'laboratory', 'centre', 'faculty', 'division', 'hospital', 'clinic',
-    'science', 'sciences', 'medicine', 'psychology', 'neuroscience', 'biology'
-}
-
-# NOTE: Removed domain-specific CS/ML terms from stopwords that should be kept:
-# - algorithm, model, function, image, task, object
-# - parameter, variable, performance, metric, evaluation
-# - optimal, control, visual, equation
-# These are meaningful topic indicators in CS/ML/AI papers!
-
-def preprocess_text(text):
-    """
-    Improved text preprocessing for better LDA results:
-    - Remove special characters, numbers, URLs, emails
-    - Fix common OCR errors and PDF artifacts
-    - Convert to lowercase and filter short words
-    - Lemmatize words and remove stopwords
-    """
-    # Remove URLs, emails, and special patterns
-    text = re.sub(r'http[s]?://\S+', ' ', text)
-    text = re.sub(r'\S+@\S+', ' ', text)
-    text = re.sub(r'\b\d+\b', ' ', text)  # Remove standalone numbers
-    
-    # Fix common PDF extraction artifacts
-    text = re.sub(r'[^\x00-\x7F]+', ' ', text)  # Remove non-ASCII
-    text = re.sub(r'\b\w{1,2}\b', ' ', text)     # Remove 1-2 letter words
-    text = re.sub(r'[^a-zA-Z\s]', ' ', text)     # Keep only letters and spaces
-    text = re.sub(r'\s+', ' ', text).strip()     # Normalize whitespace
-    text = text.lower()
-
-    # Filter out very short text
-    if len(text) < 50:
-        return ""
-
-    # Tokenize and clean
-    tokens = text.split()
-    try:
-        english_stopwords = set(stopwords.words("english"))
-        # Add enhanced academic stopwords from module constant
-        english_stopwords.update(ENHANCED_STOPWORDS)
-    except Exception as e:
-        logger.warning("NLTK stopwords failed, using fallback: %s", str(e))
-        # Fallback stopwords list with enhanced academic terms
-        english_stopwords = {
-            'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours',
-            'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself',
-            'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which',
-            'who', 'whom', 'this', 'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be',
-            'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an',
-            'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of', 'at', 'by',
-            'for', 'with', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down',
-            'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once'
-        }
-        # Merge with enhanced academic stopwords
-        english_stopwords.update(ENHANCED_STOPWORDS)
-    
-    # FIXED: Lemmatize FIRST, then filter stopwords
-    # This catches words whose lemmas are stopwords (e.g., "studies" → "study")
-    filtered_tokens = []
-    for word in tokens:
-        # Basic filtering
-        if len(word) < 3 or not word.isalpha():
-            continue
-
-        # Lemmatize if available
-        if lemmatizer:
-            # Try both noun and verb lemmatization for better results
-            noun_lemma = lemmatizer.lemmatize(word, pos='n')
-            verb_lemma = lemmatizer.lemmatize(word, pos='v')
-            # Use the shorter lemma (usually better)
-            lemma = noun_lemma if len(noun_lemma) <= len(verb_lemma) else verb_lemma
-        else:
-            lemma = word
-
-        # NOW check if lemma is stopword (after lemmatization)
-        if lemma not in english_stopwords:
-            filtered_tokens.append(lemma)
-
-    tokens = filtered_tokens
-    
-    return " ".join(tokens)
-
-def extract_text_from_pdf(pdf_path):
-    text = ""
-    try:
-        with open(pdf_path, "rb") as file:
-            reader = PdfReader(file)
-            if reader.is_encrypted:
-                try:
-                    reader.decrypt("")
-                except Exception as e:
-                    logger.warning("Skipping encrypted file %s: %s", pdf_path, str(e))
-                    return ""
-
-            for page in reader.pages:
-                page_text = page.extract_text() or ""
-                text += preprocess_text(page_text)  # Preprocess each page's text
-    except Exception as e:
-        logger.error("Error processing %s: %s", pdf_path, str(e))
-        return ""
-    return text
 
 def get_pubmed_id(title, author, year, retmax=3):
     """Search PubMed and return best matching ID"""
@@ -306,58 +104,6 @@ def get_pubmed_id(title, author, year, retmax=3):
 def safe_pubmed_lookup(*args):
     time.sleep(0.5)
     return get_pubmed_id(*args)
-
-def find_cutoff_position(text):
-    # Improved pattern - more comprehensive, case-insensitive
-    pattern = r"\b(references|bibliography|works cited|literature cited|" \
-              r"acknowledgments?|notes|endnotes|sources|cited works|" \
-              r"bibliographie|referencias|literatur)\b"
-    lower_text = text.lower()
-    matches = [match.start() for match in re.finditer(pattern, lower_text)]
-
-    if not matches:
-        return len(text)
-
-    # FIXED: Look for matches in last 60% of document (many refs sections start at 40-60%)
-    # This avoids false positives like "references to prior work" in intro
-    cutoff_threshold = int(len(text) * 0.4)
-    valid_matches = [pos for pos in matches if pos >= cutoff_threshold]
-
-    if valid_matches:
-        return min(valid_matches)
-
-    # Fallback: if no matches after 40%, but we have matches earlier,
-    # and the last match is after 30% of doc, it's probably valid
-    if matches:
-        last_match = max(matches)
-        if last_match >= int(len(text) * 0.3):
-            return last_match
-
-    return len(text)
-
-
-def clean_pdf_text(text):
-    # CRITICAL FIX: Remove in-text citations BEFORE other processing
-    # Remove citations like: (Smith et al., 2020) or (Jones & Brown, 2019)
-    text = re.sub(r'\([A-Z][a-zA-Z]+(?:\s+(?:et al\.|and|&)\s+[A-Z][a-zA-Z]+)*,?\s*\d{4}[a-z]?\)', ' ', text)
-    # Remove bracket citations like: [1], [1,2,3], [1-5]
-    text = re.sub(r'\[[0-9,\-\s]+\]', ' ', text)
-    # Remove citations like: Smith (2020) or Smith et al. (2020)
-    text = re.sub(r'\b[A-Z][a-zA-Z]+\s+(?:et al\.\s*)?\(\d{4}\)', ' ', text)
-
-    # Normalize whitespace
-    text = re.sub(r"\s+", " ", text)
-    # Remove standalone numbers
-    text = re.sub(r"\b\d+\b", " ", text)
-    text = text.lower()
-
-    # Find and remove bibliography/references section
-    cutoff_pos = find_cutoff_position(text)
-
-    if cutoff_pos < len(text) * 0.9:
-        return text[:cutoff_pos]
-    else:
-        return text
 
 def generate_decade_chart(decade_topic_distribution, lda):
     plt.ioff()
@@ -436,20 +182,6 @@ def get_top_papers(doc_topic_matrix, titles, years, authors, n=5):
         top_papers[topic_idx] = topic_papers
     
     return top_papers
-
-def prepare_gensim_corpus(doc_term_matrix, vectorizer):
-    """Convert document-term matrix to Gensim corpus format"""
-    corpus = []
-    id2word = {v: k for k, v in vectorizer.vocabulary_.items()}
-    for doc_idx in range(doc_term_matrix.shape[0]):
-        doc_bow = []
-        row = doc_term_matrix.getrow(doc_idx).toarray().flatten()
-        for word_idx, count in enumerate(row):
-            if count > 0:
-                doc_bow.append((word_idx, count))
-        corpus.append(doc_bow)
-    dictionary = corpora.Dictionary.from_corpus(corpus, id2word=id2word)
-    return corpus, dictionary
 
 def calculate_topic_diversity(topics, num_words=10):
     """Calculate topic diversity: proportion of unique words across all topics' top-N words.
@@ -1478,22 +1210,6 @@ def analyze_hdp():
         plt.close("all")
         gc.collect()
 
-
-def extract_metadata(filename):
-    """
-    Extract author, year, and title from filename format:
-    "Author et al. - Year - Title.pdf"
-    """
-    pattern = r"^(.*?) - (\d{4}) - (.*?)\.pdf$"
-    match = re.match(pattern, filename)
-    if match:
-        author = match.group(1).strip()
-        year = int(match.group(2))
-        title = match.group(3).strip()
-        return author, year, title
-    # Fallback for files that don't match pattern
-    base_name = os.path.splitext(filename)[0]
-    return base_name, 2024, base_name
 
 def generate_topic_distribution_charts(lda_model, feature_names, num_words=10):
     topic_charts = {}

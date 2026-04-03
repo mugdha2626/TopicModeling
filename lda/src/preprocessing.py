@@ -173,6 +173,9 @@ ENHANCED_STOPWORDS = {
     # Academic metadata terms
     'pmcid', 'pubmed', 'doi', 'issn', 'isbn', 'copyright', 'license',
     'elsevier', 'springer', 'wiley', 'pergamon', 'press', 'publisher', 'publication',
+    'nih', 'medline', 'crossref', 'pubmedcentral', 'manuscript', 'available',
+    'open', 'access', 'online', 'print', 'epub', 'accepted', 'received', 'revised',
+    'word', 'item', 'update',
 
     # Common affiliation/institutional words
     'department', 'university', 'college', 'institute', 'school', 'center',
