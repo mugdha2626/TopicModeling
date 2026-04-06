@@ -1057,6 +1057,76 @@ def analyze_task(file, form_data):
         except Exception as e:
             logger.warning("Could not create LDA word clouds: %s", str(e))
 
+        # Generate LDA Comprehensive Topic Overview (multi-panel, like HDP)
+        try:
+            num_cols = min(4, num_topics)
+            num_rows = (num_topics + num_cols - 1) // num_cols
+            fig, axes = plt.subplots(num_rows, num_cols, figsize=(16, 3 * num_rows))
+            fig.suptitle("LDA Comprehensive Topic Analysis", fontsize=16, y=0.98)
+
+            if num_topics == 1:
+                axes = np.array([[axes]])
+            elif num_rows == 1:
+                axes = axes.reshape(1, -1)
+
+            colors = plt.cm.tab20(np.linspace(0, 1, num_topics))
+            for i in range(num_topics):
+                row, col = divmod(i, num_cols)
+                ax = axes[row][col]
+                top_idx = components[i].argsort()[-num_words:][::-1]
+                words = [feature_names[j] for j in top_idx]
+                probs = components[i][top_idx]
+                probs = probs / probs.sum()
+
+                dom = (doc_topic_matrix[:, i] > 0.2).sum()
+                ax.barh(words[::-1], probs[::-1], color=colors[i])
+                ax.set_title(f"Topic {i+1} ({dom} docs)", fontsize=10)
+                ax.tick_params(labelsize=8)
+
+            # Hide unused subplots
+            for i in range(num_topics, num_rows * num_cols):
+                row, col = divmod(i, num_cols)
+                axes[row][col].set_visible(False)
+
+            plt.tight_layout(rect=[0, 0, 1, 0.96])
+            buf = BytesIO()
+            plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+            buf.seek(0)
+            topic_charts["LDA_Topic_Overview"] = base64.b64encode(buf.read()).decode("utf-8")
+            plt.close()
+        except Exception as e:
+            logger.warning("Could not create LDA topic overview: %s", str(e))
+
+        # Generate LDA Quality Heatmap
+        try:
+            plt.figure(figsize=(12, 6))
+            metrics_data = []
+            for i in range(num_topics):
+                dom = (doc_topic_matrix[:, i] > 0.2).sum()
+                metrics_data.append([
+                    doc_topic_matrix[:, i].mean(),
+                    doc_topic_matrix[:, i].max(),
+                    dom / len(pdf_texts),
+                ])
+            metrics_data = np.array(metrics_data).T
+
+            sns.heatmap(metrics_data,
+                       xticklabels=[f"Topic {i+1}" for i in range(num_topics)],
+                       yticklabels=['Avg Strength', 'Max Strength', 'Doc Coverage'],
+                       annot=True, fmt='.3f', cmap='YlOrRd',
+                       cbar_kws={'label': 'Strength/Coverage'})
+            plt.title("LDA Topic Quality Metrics Heatmap", fontsize=14, pad=20)
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+
+            buf = BytesIO()
+            plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+            buf.seek(0)
+            topic_charts["LDA_Quality_Heatmap"] = base64.b64encode(buf.read()).decode("utf-8")
+            plt.close()
+        except Exception as e:
+            logger.warning("Could not create LDA quality heatmap: %s", str(e))
+
         num_top_papers = int(form_data.get("numTopPapers", 5))  # Default to 5
         logger.debug("Getting top %s papers for each topic...", num_top_papers)
         top_papers = get_top_papers(doc_topic_matrix, titles, years, authors, num_top_papers)
