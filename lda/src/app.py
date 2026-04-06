@@ -6,7 +6,7 @@ import re
 import base64
 from io import BytesIO
 from sklearn.decomposition import LatentDirichletAllocation as LDA
-from nltk.stem import WordNetLemmatizer
+from nltk.stem import SnowballStemmer
 from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import CountVectorizer
 from gensim import corpora
@@ -58,22 +58,14 @@ logging.getLogger("PIL").setLevel(logging.INFO)
 
 
 try:
-    # Download required NLTK data
-    nltk.download("wordnet", quiet=True)
     nltk.download("stopwords", quiet=True)
-    nltk.download("omw-1.4", quiet=True)  # CRITICAL: Required for WordNet lemmatizer
-    nltk.download("averaged_perceptron_tagger", quiet=True)  # For POS tagging
-
-    # Test if downloads worked
     from nltk.corpus import stopwords
     test_stops = stopwords.words("english")
-    lemmatizer = WordNetLemmatizer()
-    # Test lemmatizer
-    test_lemma = lemmatizer.lemmatize("studies")
+    stemmer = SnowballStemmer("english")
     logger.info("NLTK properly initialized with %d stopwords", len(test_stops))
 except Exception as e:
     logger.error("NLTK initialization failed: %s. App will use fallback.", str(e))
-    lemmatizer = None
+    stemmer = None
 
 logging.getLogger("PyPDF2").setLevel(logging.ERROR)
 
@@ -425,109 +417,162 @@ def analyze_hdp_task(file, form_data):
         if not pdf_texts:
             return {"error": "No valid text extracted from PDFs."}
 
-        # Create document-term matrix with HDP-optimized parameters
-        # Scale vocabulary size based on corpus size
+        # Scale vocabulary based on corpus size
+        # max_df=0.35 drops words in 35%+ of docs (strict for single-field corpora)
+        # min_df=2% drops words in <2% of docs (noise, author names)
+        import math
         if pdf_count < 50:
-            max_features = 1000  # Small corpus: moderate vocabulary
+            max_features = 1000
         elif pdf_count < 500:
-            max_features = 2500  # Medium corpus: larger vocabulary
+            max_features = 3000
+        elif pdf_count < 5000:
+            max_features = 5000
         else:
-            max_features = 5000  # Large corpus: extensive vocabulary
+            max_features = 8000
 
-        logger.info(f"Vocabulary scaling: {pdf_count} documents → max_features={max_features}")
-        print(f"📚 Vocabulary size: {max_features} words (scaled for {pdf_count} documents)")
+        hdp_max_df = 0.35
+        hdp_min_df = max(2, pdf_count // 50)
 
+        logger.info(f"Vocabulary scaling: {pdf_count} documents → max_features={max_features}, max_df={hdp_max_df}, min_df={hdp_min_df}")
+        print(f"📚 Vocabulary: {max_features} words, max_df={hdp_max_df}, min_df={hdp_min_df} (scaled for {pdf_count} documents)")
+
+        # HDP requires raw counts (bag-of-words), NOT TF-IDF
         vectorizer = CountVectorizer(
-            max_df=0.7,           # Exclude words in >70% of docs (aligned with LDA)
-            min_df=max(2, pdf_count // 50),  # Require words in at least 2% of docs
+            max_df=hdp_max_df,
+            min_df=hdp_min_df,
             stop_words=all_stopwords,
-            token_pattern=r'\b[a-zA-Z]{3,}\b',  # 3+ letter words (aligned with LDA)
-            max_features=max_features,  # Scaled vocabulary based on corpus size
+            token_pattern=r'\b[a-zA-Z]{3,}\b',
+            max_features=max_features,
         )
-        
+
         doc_term_matrix = vectorizer.fit_transform(pdf_texts)
         feature_names = vectorizer.get_feature_names_out()
 
-        # Prepare Gensim corpus
+        # Prepare Gensim corpus (bag-of-words format)
         corpus, dictionary = prepare_gensim_corpus(doc_term_matrix, vectorizer)
 
         # Train HDP model
-        # HDP automatically discovers the number of topics
-        # T and K control the truncation levels
-        # Scale T and gamma based on corpus size to prevent topic explosion
-
-        if pdf_count < 50:
-            # Small corpus: limit topics aggressively
-            T = 15
-            gamma_scaled = 0.5
-        elif pdf_count < 500:
-            # Medium corpus: moderate topic limit
+        # Scale HDP params with corpus size
+        # Larger corpus needs higher T ceiling and higher gamma to find more topics
+        if pdf_count < 100:
+            T = 20
+            hdp_gamma = 0.5
+        elif pdf_count < 1000:
             T = 30
-            gamma_scaled = 0.3
-        elif pdf_count < 5000:
-            # Large corpus: allow more topics but lower gamma
-            T = 50
-            gamma_scaled = 0.1
+            hdp_gamma = 1.0
         else:
-            # Very large corpus: highest limit but lowest gamma
-            T = 75
-            gamma_scaled = 0.05
+            T = 50
+            hdp_gamma = 1.5
 
-        logger.info(f"HDP scaling: {pdf_count} documents → T={T}, gamma={gamma_scaled}")
-        print(f"\n📊 HDP Auto-scaling: {pdf_count} documents → T={T}, gamma={gamma_scaled}")
+        logger.info(f"HDP params: T={T}, alpha=1, gamma={hdp_gamma}, eta=0.01, kappa=0.7, tau=256")
+        print(f"\n📊 HDP Training: T={T}, gamma={hdp_gamma}, {pdf_count} documents")
 
         hdp_model = HdpModel(
             corpus=corpus,
             id2word=dictionary,
             random_state=42,
-            alpha=alpha,         # Document-topic concentration (from user input, default 0.1)
-            gamma=gamma_scaled,  # Topic-level concentration (scaled by corpus size)
-            eta=0.01,            # Topic-word concentration (sparsity in word distribution)
-            T=T,                 # First-level truncation (scaled by corpus size)
-            K=15,                # Second-level truncation (max topics per document)
-            kappa=0.75,          # Learning rate decay
-            tau=64.0             # Learning rate delay
+            alpha=1,
+            gamma=hdp_gamma,
+            eta=0.01,
+            T=T,
+            K=8,
+            kappa=0.7,
+            tau=256.0,
+            chunksize=min(256, pdf_count),
         )
 
-        # Extract significant topics based on prevalence (not just word mass)
         all_topics = hdp_model.get_topics()
 
-        # Calculate topic prevalence (how much each topic is used across documents)
+        # Gate 1: Use hdp_to_lda() alpha weights to find alive topics
+        lda_alpha, lda_beta = hdp_model.hdp_to_lda()
+        alpha_alive = set(i for i, a in enumerate(lda_alpha) if a > 0.01)
+        print(f"   Alpha gate: {len(alpha_alive)}/{len(all_topics)} topics alive")
+
+        # Gate 2: Calculate prevalence only for alive topics
         topic_prevalences = []
         for topic_idx in range(len(all_topics)):
+            if topic_idx not in alpha_alive:
+                continue
             doc_topic_weights = []
             for doc_bow in corpus:
                 doc_topic_dist = dict(hdp_model[doc_bow])
                 topic_weight = doc_topic_dist.get(topic_idx, 0.0)
                 doc_topic_weights.append(topic_weight)
-
             avg_prevalence = np.mean(doc_topic_weights)
             topic_prevalences.append((topic_idx, avg_prevalence))
 
-        # Sort by prevalence (descending) and keep only top topics
         topic_prevalences.sort(key=lambda x: x[1], reverse=True)
 
-        # Dynamic threshold: keep top N topics based on corpus size
-        if pdf_count < 100:
-            max_topics_to_keep = 8
-        elif pdf_count < 1000:
-            max_topics_to_keep = 15
-        elif pdf_count < 5000:
-            max_topics_to_keep = 25
-        else:
-            max_topics_to_keep = 35
+        # Gate 3: Logarithmic topic cap + prevalence threshold
+        max_topics_to_keep = max(5, min(25, int(5 + 5 * math.log10(max(pdf_count, 10)))))
+        min_prevalence = 0.02  # Topic must cover >2% of corpus
 
-        # Filter: (1) Top N by prevalence, (2) Must have prevalence > 1% of corpus
-        min_prevalence = 0.01
         significant_topic_indices = []
         for topic_idx, prevalence in topic_prevalences[:max_topics_to_keep]:
             if prevalence > min_prevalence:
                 significant_topic_indices.append(topic_idx)
 
+        # Safety net: at least 3 topics
+        if len(significant_topic_indices) < 3 and len(topic_prevalences) >= 3:
+            significant_topic_indices = [idx for idx, _ in topic_prevalences[:3]]
+
+        # Gate 4: Remove junk/catch-all topics (flat word distribution)
+        # Threshold scales with vocab size — larger vocab = lower expected top-word prob
+        vocab_size = len(feature_names)
+        flat_threshold = max(0.003, 10.0 / vocab_size)
+        print(f"   Flat topic threshold: {flat_threshold:.4f} (vocab={vocab_size})")
+
+        filtered_indices = []
+        for topic_idx in significant_topic_indices:
+            topic_words = hdp_model.show_topic(topic_idx, topn=15)
+            if not topic_words:
+                continue
+            top_prob = topic_words[0][1]
+            if top_prob < flat_threshold:
+                print(f"   Removing flat topic {topic_idx}: top_prob={top_prob:.4f}")
+                continue
+            filtered_indices.append(topic_idx)
+        significant_topic_indices = filtered_indices
+
+        # Gate 5: Remove topics with no strongly-associated documents
+        strong_indices = []
+        for topic_idx in significant_topic_indices:
+            max_doc_weight = max(
+                (dict(hdp_model[doc_bow]).get(topic_idx, 0.0) for doc_bow in corpus),
+                default=0.0
+            )
+            if max_doc_weight < 0.10:
+                print(f"   Removing weak topic {topic_idx}: max_doc_weight={max_doc_weight:.3f}")
+                continue
+            strong_indices.append(topic_idx)
+        significant_topic_indices = strong_indices
+
+        # Gate 6: Merge highly similar topics (Jaccard > 0.4 on top-10 words)
+        topic_word_sets = {}
+        for topic_idx in significant_topic_indices:
+            words = [w for w, _ in hdp_model.show_topic(topic_idx, topn=10)]
+            topic_word_sets[topic_idx] = set(words)
+
+        merged_out = set()
+        for i, idx_i in enumerate(significant_topic_indices):
+            if idx_i in merged_out:
+                continue
+            for j, idx_j in enumerate(significant_topic_indices[i+1:], i+1):
+                if idx_j in merged_out:
+                    continue
+                intersection = topic_word_sets[idx_i] & topic_word_sets[idx_j]
+                union = topic_word_sets[idx_i] | topic_word_sets[idx_j]
+                jaccard = len(intersection) / len(union) if union else 0
+                if jaccard > 0.4:
+                    merged_out.add(idx_j)
+                    print(f"   Merging topic {idx_j} into {idx_i} (Jaccard={jaccard:.2f})")
+
+        significant_topic_indices = [idx for idx in significant_topic_indices if idx not in merged_out]
+
         num_active_topics = len(significant_topic_indices)
 
-        logger.info(f"HDP discovered {len(all_topics)} topics, keeping top {num_active_topics} by prevalence")
-        print(f"📊 HDP discovered {len(all_topics)} topics → keeping top {num_active_topics} (prevalence > {min_prevalence:.1%})")
+        logger.info(f"HDP discovered {len(all_topics)} topics, keeping {num_active_topics} after filtering")
+        print(f"📊 HDP: {len(all_topics)} slots → {len(alpha_alive)} alive → {num_active_topics} final topics")
 
 
         if num_active_topics == 0:
@@ -553,11 +598,23 @@ def analyze_hdp_task(file, form_data):
         topics = []
         topic_word_distributions = []
 
+        # Cross-topic word dedup: find words in top-10 of 3+ topics
+        from collections import Counter as _Counter
+        _word_topic_count = _Counter()
+        for topic_idx in significant_topic_indices:
+            for w, _ in hdp_model.show_topic(topic_idx, topn=10):
+                _word_topic_count[w] += 1
+        _cross_topic_words = {w for w, c in _word_topic_count.items() if c >= 3}
+        if _cross_topic_words:
+            print(f"   Cross-topic words (in 3+ topics, will be replaced): {_cross_topic_words}")
+
         print("\n*** DETAILED TOPIC BREAKDOWN: ***")
         print("-"*60)
 
         for i, topic_idx in enumerate(significant_topic_indices):
-            topic_words = hdp_model.show_topic(topic_idx, topn=num_words)
+            # Get more words than needed, then skip cross-topic ones
+            topic_words_raw = hdp_model.show_topic(topic_idx, topn=num_words + len(_cross_topic_words) + 5)
+            topic_words = [(w, p) for w, p in topic_words_raw if w not in _cross_topic_words][:num_words]
             top_words = [word for word, prob in topic_words]
             probabilities = [prob for word, prob in topic_words]
             
@@ -820,31 +877,43 @@ def analyze_task(file, form_data):
                         pdf_count += 1
         if not pdf_texts:
             return {"error": "No valid text extracted from PDFs."}
-        # Scale vocabulary size based on corpus size (matches HDP approach)
-        if pdf_count < 50:
+        # Scale vocabulary and max_df based on corpus size
+        if pdf_count < 30:
+            lda_max_features = 300
+            lda_max_df = 0.3
+        elif pdf_count < 50:
+            lda_max_features = 500
+            lda_max_df = 0.4
+        elif pdf_count < 100:
             lda_max_features = 1000
+            lda_max_df = 0.5
         elif pdf_count < 500:
             lda_max_features = 2000
+            lda_max_df = 0.5
         elif pdf_count < 5000:
             lda_max_features = 5000
+            lda_max_df = 0.5
         else:
             lda_max_features = 8000
+            lda_max_df = 0.5
+
+        lda_min_df = max(2, pdf_count // 50)  # Word must appear in 2%+ of docs
 
         vectorizer_params = {
-                "max_df": 0.7,
-                "min_df": 2,
+                "max_df": lda_max_df,
+                "min_df": lda_min_df,
                 "stopwords_count": len(all_stopwords),
                 "max_features": lda_max_features
             }
-        # Use CountVectorizer instead of TfidfVectorizer for better LDA performance
-        # Scale min_df with corpus size: word must appear in enough docs to be meaningful
-        lda_min_df = max(2, pdf_count // 100)  # At least 1% of docs
+
+        # LDA requires raw counts (bag-of-words), not TF-IDF
+        # max_df=0.5 handles cross-topic words by excluding them
         vectorizer = CountVectorizer(
-            max_df=0.7,   # Exclude words appearing in >70% of documents
+            max_df=lda_max_df,
             min_df=lda_min_df,
             stop_words=all_stopwords,
-            token_pattern=r'\b[a-zA-Z]{3,}\b',  # Only words with 3+ letters
-            max_features=lda_max_features,  # Corpus-scaled vocabulary size
+            token_pattern=r'\b[a-zA-Z]{3,}\b',
+            max_features=lda_max_features,
         )
         doc_term_matrix = vectorizer.fit_transform(pdf_texts)
         feature_names = vectorizer.get_feature_names_out()

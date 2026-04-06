@@ -6,7 +6,7 @@ Used by both app.py (Flask backend) and gen.py (standalone script).
 import re
 import logging
 import nltk
-from nltk.stem import WordNetLemmatizer
+from nltk.stem import SnowballStemmer
 from nltk.corpus import stopwords
 from PyPDF2 import PdfReader
 from gensim import corpora
@@ -16,18 +16,14 @@ logger = logging.getLogger(__name__)
 
 # Initialize NLTK resources
 try:
-    nltk.download("wordnet", quiet=True)
     nltk.download("stopwords", quiet=True)
-    nltk.download("omw-1.4", quiet=True)
-    nltk.download("averaged_perceptron_tagger", quiet=True)
-
     _test_stops = stopwords.words("english")
-    lemmatizer = WordNetLemmatizer()
-    _test_lemma = lemmatizer.lemmatize("studies")
+    stemmer = SnowballStemmer("english")
+    _test_stem = stemmer.stem("studies")
     logger.info("NLTK properly initialized with %d stopwords", len(_test_stops))
 except Exception as e:
     logger.error("NLTK initialization failed: %s. Will use fallback.", str(e))
-    lemmatizer = None
+    stemmer = None
 
 
 # Enhanced stopwords for academic/research papers
@@ -175,7 +171,51 @@ ENHANCED_STOPWORDS = {
     'elsevier', 'springer', 'wiley', 'pergamon', 'press', 'publisher', 'publication',
     'nih', 'medline', 'crossref', 'pubmedcentral', 'manuscript', 'available',
     'open', 'access', 'online', 'print', 'epub', 'accepted', 'received', 'revised',
-    'word', 'item', 'update',
+    'word', 'words', 'item', 'items', 'update',
+
+    # Experimental methodology words (describe HOW, not WHAT research is about)
+    'letter', 'letters', 'sentence', 'sentences', 'paragraph',
+    'stimulus', 'stimuli', 'target', 'targets', 'probe', 'probes',
+    'cue', 'cues', 'trial', 'trials', 'block', 'blocks',
+    'load', 'loading', 'face', 'faces', 'object', 'objects',
+    'location', 'locations', 'display', 'scene', 'scenes',
+    'left', 'right', 'hand', 'hands', 'button', 'press',
+    'adult', 'adults', 'child', 'children', 'infant', 'infants',
+    'adolescent', 'adolescents', 'participant', 'participants',
+    'period', 'rest', 'resting', 'session', 'sessions',
+    'accuracy', 'correct', 'incorrect', 'speed', 'slow', 'fast',
+    'train', 'training', 'trained', 'learn', 'learned', 'learning',
+    'connectivity', 'connected', 'connection', 'connections',
+    'delay', 'delayed', 'encode', 'encoding', 'encoded',
+    'maintenance', 'maintain', 'maintained',
+    'switch', 'switching', 'refresh', 'interference',
+    'post', 'dual', 'skill', 'skills', 'rule', 'rules',
+    'outcome', 'outcomes', 'recognition', 'meta', 'activation',
+    'signal', 'signals', 'inhibition', 'frontal', 'temporal',
+    'prefrontal', 'network', 'networks', 'deficit', 'deficits',
+    'disorder', 'disorders', 'negative', 'positive',
+    'list', 'lists', 'semantic', 'developmental', 'sensory', 'perceptual',
+    'quarterly', 'library', 'comply', 'null', 'code', 'mail', 'free',
+    'half', 'edge', 'unite', 'drop', 'miss', 'born', 'risk',
+    'easy', 'hard', 'quickly', 'slowly', 'fully',
+    'month', 'months', 'week', 'weeks', 'day', 'days',
+    'transfer', 'intervention', 'improvement', 'eye', 'eyes',
+    'array', 'picture', 'pictures', 'category', 'categories',
+    'parietal', 'occipital',
+
+    # Working memory researcher surnames (leak from citations)
+    'engle', 'klingberg', 'miyake', 'oberauer', 'gathercole', 'daneman',
+    'caplan', 'alloway', 'barrouillet', 'vogel', 'egner', 'kiyonaga',
+    'luria', 'baddeley', 'hitch', 'cowan', 'luck', 'awh', 'jonides',
+    'kane', 'conway', 'unsworth', 'redick', 'shipstead', 'jaeggi',
+    'logie', 'repovs', 'chein', 'postle', 'salthouse', 'verhaeghen',
+    'mammarella', 'koziol', 'slotnick', 'balaban', 'lorenz', 'reuter',
+    'teng', 'peng', 'buschkuehl', 'crone', 'courtney', 'rypma',
+    'friedman', 'hambrick', 'hasher', 'lustig', 'zacks', 'borella',
+    'carretti', 'cornoldi', 'passolunghi', 'swanson',
+    'mikels', 'rudner', 'masson', 'menon', 'atkinson', 'braver',
+    'monsell', 'navon', 'posner', 'treisman', 'lavie', 'desimone',
+    'barch', 'botvinick', 'cohen', 'miller', 'todd', 'marois',
 
     # Common affiliation/institutional words
     'department', 'university', 'college', 'institute', 'school', 'center',
@@ -218,7 +258,6 @@ def preprocess_text(text):
     except Exception:
         english_stopwords = set(ENHANCED_STOPWORDS)
 
-    # Add common short function words that slip through NLTK's list
     english_stopwords.update({
         'was', 'has', 'had', 'were', 'been', 'did', 'does', 'got',
         'set', 'get', 'put', 'let', 'say', 'see', 'saw', 'run', 'ran',
@@ -226,6 +265,10 @@ def preprocess_text(text):
         'www', 'http', 'https', 'org', 'com', 'edu', 'pdf', 'pmc',
         'fig', 'tab', 'vol', 'ref', 'ect', 'etc',
     })
+
+    # Stem all stopwords too, so stemmed tokens get caught
+    if stemmer:
+        english_stopwords = {stemmer.stem(w) for w in english_stopwords} | english_stopwords
 
     # Common word fragments from broken PDF hyphenation that slip through
     _FRAGMENTS = {
@@ -235,13 +278,17 @@ def preprocess_text(text):
         'sion', 'ence', 'ance', 'able', 'ible',
         'wa', 'ha', 'tho', 'thu', 'whi', 'ther',  # lemmatizer artifacts
         'com', 'atr', 'lar', 'ter', 'pre', 'pro', 'dis', 'sub',  # common fragments
+        'speci', 'neurosci', 'lett', 'dif',  # truncated words from PDFs
+        'tnum', 'cits', 'erences', 'gural', 'ciency', 'schizophr',  # PDF artifacts
+        'psychol', 'cogn', 'percept', 'behav', 'psychiatr', 'pmid',  # journal abbrevs
+        'buff', 'camo', 'numer', 'cognit', 'cereb', 'proce',  # fragments
     }
 
     # Known 3-letter scientific acronyms worth keeping
     _VALID_SHORT = {
         'eeg', 'erp', 'meg', 'roi', 'fmr', 'pet', 'mri', 'dti', 'tms',
         'pfc', 'acc', 'ica', 'svm', 'bci', 'emg', 'lfp', 'snr', 'bdd',
-        'vep', 'eog', 'ecg', 'roc', 'auc', 'cue', 'map', 'fly', 'eye',
+        'vep', 'eog', 'ecg', 'roc', 'auc', 'map', 'fly', 'eye',
         'arm', 'leg', 'ear', 'jaw', 'lip', 'rib', 'hip', 'gut',  # body parts
     }
 
@@ -260,22 +307,16 @@ def preprocess_text(text):
         if word in _FRAGMENTS:
             continue
 
-        if lemmatizer:
-            # Use verb lemma only for words with verb-like endings,
-            # to avoid "left" -> "leave", "right" -> "right" mismatches
-            noun_lemma = lemmatizer.lemmatize(word, pos='n')
-            adj_lemma = lemmatizer.lemmatize(word, pos='a')
-            adv_lemma = lemmatizer.lemmatize(word, pos='r')
-            candidates = [noun_lemma, adj_lemma, adv_lemma]
-            if word.endswith(('ed', 'ing', 'es', 'ates', 'ized', 'ised')):
-                verb_lemma = lemmatizer.lemmatize(word, pos='v')
-                candidates.append(verb_lemma)
-            lemma = min(candidates, key=len)
+        # Snowball stemmer handles both inflectional AND derivational morphology:
+        # "emotional"/"emotion" → "emot", "behavioral"/"behavior" → "behavior"
+        # "neuronal"/"neuron" → "neuron", "oscillatory"/"oscillation" → "oscil"
+        if stemmer:
+            stem = stemmer.stem(word)
         else:
-            lemma = word
+            stem = word
 
-        if lemma not in english_stopwords:
-            filtered_tokens.append(lemma)
+        if stem not in english_stopwords and len(stem) >= 3:
+            filtered_tokens.append(stem)
 
     return " ".join(filtered_tokens)
 
