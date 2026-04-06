@@ -1027,7 +1027,36 @@ def analyze_task(file, form_data):
                     "percentages": (raw_weights / raw_weights.sum() * 100).round(2).tolist()
                 }
             })
-            
+
+        # Generate LDA Word Clouds for top 3 topics (by document coverage)
+        try:
+            topic_doc_coverage = [(i, (doc_topic_matrix[:, i] > 0.2).sum()) for i in range(num_topics)]
+            topic_doc_coverage.sort(key=lambda x: x[1], reverse=True)
+            top_3 = topic_doc_coverage[:min(3, num_topics)]
+
+            fig, axes = plt.subplots(1, len(top_3), figsize=(5*len(top_3), 5))
+            if len(top_3) == 1:
+                axes = [axes]
+            fig.suptitle("Word Clouds for Top LDA Topics", fontsize=16, y=0.95)
+
+            for i, (tidx, doc_count) in enumerate(top_3):
+                top_idx = components[tidx].argsort()[-20:][::-1]
+                word_freq = {feature_names[j]: float(components[tidx][j]) for j in top_idx}
+                wc = WordCloud(width=400, height=300, background_color='white',
+                              max_words=20, colormap='viridis').generate_from_frequencies(word_freq)
+                axes[i].imshow(wc, interpolation='bilinear')
+                axes[i].set_title(f"Topic {tidx+1} ({doc_count} docs)", fontsize=12)
+                axes[i].axis('off')
+
+            plt.tight_layout()
+            buf = BytesIO()
+            plt.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+            buf.seek(0)
+            topic_charts["LDA_Word_Clouds"] = base64.b64encode(buf.read()).decode("utf-8")
+            plt.close()
+        except Exception as e:
+            logger.warning("Could not create LDA word clouds: %s", str(e))
+
         num_top_papers = int(form_data.get("numTopPapers", 5))  # Default to 5
         logger.debug("Getting top %s papers for each topic...", num_top_papers)
         top_papers = get_top_papers(doc_topic_matrix, titles, years, authors, num_top_papers)

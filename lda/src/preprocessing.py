@@ -282,6 +282,8 @@ def preprocess_text(text):
         'tnum', 'cits', 'erences', 'gural', 'ciency', 'schizophr',  # PDF artifacts
         'psychol', 'cogn', 'percept', 'behav', 'psychiatr', 'pmid',  # journal abbrevs
         'buff', 'camo', 'numer', 'cognit', 'cereb', 'proce',  # fragments
+        'nding', 'erent', 'uenc', 'culti', 'erenc', 'ings',  # more fragments
+        'frontier', 'frontiersin', 'plos', 'elsevier', 'wiley',  # journal names
     }
 
     # Known 3-letter scientific acronyms worth keeping
