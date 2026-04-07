@@ -53,9 +53,15 @@ matplotlib_logger = logging.getLogger("matplotlib")
 matplotlib_logger.setLevel(logging.WARNING)
 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S'
+)
 logger = logging.getLogger(__name__)
-logging.getLogger("PIL").setLevel(logging.INFO)
+logging.getLogger("PIL").setLevel(logging.WARNING)
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
+logging.getLogger("gensim").setLevel(logging.WARNING)
 
 
 try:
@@ -418,6 +424,11 @@ def analyze_hdp_task(file, form_data):
         if not pdf_texts:
             return {"error": "No valid text extracted from PDFs."}
 
+        print(f"\n{'='*60}")
+        print(f"  HDP ANALYSIS PIPELINE")
+        print(f"{'='*60}")
+        print(f"  [1/7] PDF extraction: {pdf_count} valid documents")
+
         # Build stem→display word map for readable topic words
         stem_map = build_stem_display_map(pdf_texts)
 
@@ -437,8 +448,7 @@ def analyze_hdp_task(file, form_data):
         hdp_max_df = 0.35
         hdp_min_df = max(2, pdf_count // 50)
 
-        logger.info(f"Vocabulary scaling: {pdf_count} documents → max_features={max_features}, max_df={hdp_max_df}, min_df={hdp_min_df}")
-        print(f"📚 Vocabulary: {max_features} words, max_df={hdp_max_df}, min_df={hdp_min_df} (scaled for {pdf_count} documents)")
+        print(f"  [2/7] Vectorizing: max_features={max_features}, max_df={hdp_max_df}, min_df={hdp_min_df}")
 
         # HDP requires raw counts (bag-of-words), NOT TF-IDF
         vectorizer = CountVectorizer(
@@ -452,11 +462,11 @@ def analyze_hdp_task(file, form_data):
         doc_term_matrix = vectorizer.fit_transform(pdf_texts)
         feature_names_raw = vectorizer.get_feature_names_out()
         feature_names = np.array(unstem_words(list(feature_names_raw)))
+        print(f"         Vocabulary: {len(feature_names)} words after filtering")
 
-        # Prepare Gensim corpus (bag-of-words format)
         corpus, dictionary = prepare_gensim_corpus(doc_term_matrix, vectorizer)
+        print(f"  [3/7] Training HDP model...")
 
-        # Train HDP model
         # Scale HDP params with corpus size
         # Larger corpus needs higher T ceiling and higher gamma to find more topics
         if pdf_count < 100:
@@ -487,11 +497,13 @@ def analyze_hdp_task(file, form_data):
         )
 
         all_topics = hdp_model.get_topics()
+        print(f"         T={T}, gamma={hdp_gamma}, produced {len(all_topics)} topic slots")
+        print(f"  [4/7] Filtering topics...")
 
         # Gate 1: Use hdp_to_lda() alpha weights to find alive topics
         lda_alpha, lda_beta = hdp_model.hdp_to_lda()
         alpha_alive = set(i for i, a in enumerate(lda_alpha) if a > 0.01)
-        print(f"   Alpha gate: {len(alpha_alive)}/{len(all_topics)} topics alive")
+        print(f"         Gate 1 (alpha weights): {len(alpha_alive)}/{len(all_topics)} alive")
 
         # Gate 2: Calculate prevalence only for alive topics
         topic_prevalences = []
@@ -577,7 +589,8 @@ def analyze_hdp_task(file, form_data):
         num_active_topics = len(significant_topic_indices)
 
         logger.info(f"HDP discovered {len(all_topics)} topics, keeping {num_active_topics} after filtering")
-        print(f"📊 HDP: {len(all_topics)} slots → {len(alpha_alive)} alive → {num_active_topics} final topics")
+        print(f"  [5/7] Final: {num_active_topics} topics")
+        print(f"         Pipeline: {len(all_topics)} slots → {len(alpha_alive)} alive → {num_active_topics} after filters")
 
 
         if num_active_topics == 0:
@@ -611,7 +624,7 @@ def analyze_hdp_task(file, form_data):
                 _word_topic_count[w] += 1
         _cross_topic_words = {w for w, c in _word_topic_count.items() if c >= 3}
         if _cross_topic_words:
-            print(f"   Cross-topic words (in 3+ topics, will be replaced): {_cross_topic_words}")
+            print(f"  [6/7] Cross-topic dedup: removing {_cross_topic_words} from display")
 
         print("\n*** DETAILED TOPIC BREAKDOWN: ***")
         print("-"*60)
@@ -883,7 +896,11 @@ def analyze_task(file, form_data):
         if not pdf_texts:
             return {"error": "No valid text extracted from PDFs."}
 
-        # Build stem→display word map for readable topic words
+        print(f"\n{'='*60}")
+        print(f"  LDA ANALYSIS PIPELINE")
+        print(f"{'='*60}")
+        print(f"  [1/6] PDF extraction: {pdf_count} valid documents")
+
         stem_map = build_stem_display_map(pdf_texts)
 
         # Scale vocabulary and max_df based on corpus size
@@ -924,13 +941,15 @@ def analyze_task(file, form_data):
             token_pattern=r'\b[a-zA-Z]{3,}\b',
             max_features=lda_max_features,
         )
+        print(f"  [2/6] Vectorizing: max_features={lda_max_features}, max_df={lda_max_df}, min_df={lda_min_df}")
         doc_term_matrix = vectorizer.fit_transform(pdf_texts)
         feature_names_raw = vectorizer.get_feature_names_out()
         feature_names = np.array(unstem_words(list(feature_names_raw)))
+        print(f"         Vocabulary: {len(feature_names)} words after filtering")
 
         # Train LDA model
-        # Use 'online' for large corpora (faster convergence), 'batch' for small
         learning = 'online' if pdf_count > 500 else 'batch'
+        print(f"  [3/6] Training LDA: k={num_topics}, method={learning}, max_iter=300")
         lda = LDA(
             n_components=num_topics,
             random_state=42,
@@ -946,10 +965,10 @@ def analyze_task(file, form_data):
         if lda.components_.shape[0] == 0:
             return {"error": "LDA model training failed. No topics generated."}
 
-        converged = lda.n_iter_ < 200
-        if not converged:
-            logger.warning("LDA did not converge within 200 iterations")
-            print("⚠️  WARNING: LDA did not converge within 200 iterations. Results may be suboptimal.")
+        converged = lda.n_iter_ < 300
+        print(f"         Converged: {converged} (iterations: {lda.n_iter_})")
+        print(f"         Perplexity: {lda.perplexity(doc_term_matrix):.2f}")
+        print(f"  [4/6] Generating topic charts and word clouds...")
 
         logger.debug("Trained LDA model with %s topics (converged: %s)", lda.n_components, converged)
         
@@ -1181,6 +1200,7 @@ def analyze_task(file, form_data):
         print(f"      - Stopwords count: {len(all_stopwords)}")
         print("="*80)
 
+        print(f"  [5/6] Calculating coherence and diversity...")
         # Calculate topic coherence (c_v) and diversity
         topic_word_lists = []
         for topic_idx in range(lda.n_components):
@@ -1205,6 +1225,7 @@ def analyze_task(file, form_data):
         else:
             print("   ⚠️ Could not calculate coherence scores")
 
+        print(f"  [6/6] Preparing results for export...")
         # Prepare topic-word probabilities for export
         topic_word_distributions = []
         for topic_idx in range(lda.n_components):
