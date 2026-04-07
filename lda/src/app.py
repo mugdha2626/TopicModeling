@@ -26,7 +26,8 @@ from wordcloud import WordCloud
 from preprocessing import (
     ENHANCED_STOPWORDS, preprocess_text, extract_text_from_pdf,
     clean_pdf_text, find_cutoff_position, prepare_gensim_corpus,
-    extract_metadata, get_all_stopwords
+    extract_metadata, get_all_stopwords,
+    build_stem_display_map, unstem_words
 )
 
 matplotlib.use("Agg")
@@ -417,6 +418,9 @@ def analyze_hdp_task(file, form_data):
         if not pdf_texts:
             return {"error": "No valid text extracted from PDFs."}
 
+        # Build stem→display word map for readable topic words
+        stem_map = build_stem_display_map(pdf_texts)
+
         # Scale vocabulary based on corpus size
         # max_df=0.35 drops words in 35%+ of docs (strict for single-field corpora)
         # min_df=2% drops words in <2% of docs (noise, author names)
@@ -446,7 +450,8 @@ def analyze_hdp_task(file, form_data):
         )
 
         doc_term_matrix = vectorizer.fit_transform(pdf_texts)
-        feature_names = vectorizer.get_feature_names_out()
+        feature_names_raw = vectorizer.get_feature_names_out()
+        feature_names = np.array(unstem_words(list(feature_names_raw)))
 
         # Prepare Gensim corpus (bag-of-words format)
         corpus, dictionary = prepare_gensim_corpus(doc_term_matrix, vectorizer)
@@ -877,6 +882,10 @@ def analyze_task(file, form_data):
                         pdf_count += 1
         if not pdf_texts:
             return {"error": "No valid text extracted from PDFs."}
+
+        # Build stem→display word map for readable topic words
+        stem_map = build_stem_display_map(pdf_texts)
+
         # Scale vocabulary and max_df based on corpus size
         if pdf_count < 30:
             lda_max_features = 300
@@ -916,17 +925,19 @@ def analyze_task(file, form_data):
             max_features=lda_max_features,
         )
         doc_term_matrix = vectorizer.fit_transform(pdf_texts)
-        feature_names = vectorizer.get_feature_names_out()
+        feature_names_raw = vectorizer.get_feature_names_out()
+        feature_names = np.array(unstem_words(list(feature_names_raw)))
 
         # Train LDA model
-        # Improved LDA parameters for better topic quality
+        # Use 'online' for large corpora (faster convergence), 'batch' for small
+        learning = 'online' if pdf_count > 500 else 'batch'
         lda = LDA(
             n_components=num_topics,
             random_state=42,
-            doc_topic_prior=0.1/num_topics,  # Alpha - sparse prior; academic papers focus on 1-2 topics
-            topic_word_prior=0.01,  # Beta - lower values encourage topics to focus on fewer words
-            learning_method='batch',
-            max_iter=200,
+            doc_topic_prior=0.1/num_topics,
+            topic_word_prior=0.01,
+            learning_method=learning,
+            max_iter=300,
             evaluate_every=10,
             perp_tol=1e-3
         )

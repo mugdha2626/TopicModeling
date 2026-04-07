@@ -216,6 +216,8 @@ ENHANCED_STOPWORDS = {
     'mikels', 'rudner', 'masson', 'menon', 'atkinson', 'braver',
     'monsell', 'navon', 'posner', 'treisman', 'lavie', 'desimone',
     'barch', 'botvinick', 'cohen', 'miller', 'todd', 'marois',
+    'goldman', 'rakic', 'fuster', 'baddeley', 'shimizu', 'purdu',
+    'wechsler', 'raven',  # test names that leak as author names
 
     # Common affiliation/institutional words
     'department', 'university', 'college', 'institute', 'school', 'center',
@@ -321,6 +323,54 @@ def preprocess_text(text):
             filtered_tokens.append(stem)
 
     return " ".join(filtered_tokens)
+
+
+# Common stem → readable word mapping for neuroscience/psychology
+# Snowball produces ugly stems; this makes topic words readable in the UI
+STEM_DISPLAY_MAP = {
+    'emot': 'emotion', 'arithmet': 'arithmetic', 'oscil': 'oscillation',
+    'neuron': 'neuron', 'hippocamp': 'hippocampal', 'cortex': 'cortex',
+    'stimul': 'stimulation', 'inhibitori': 'inhibitory', 'anxieti': 'anxiety',
+    'regul': 'regulation', 'schizophrenia': 'schizophrenia',
+    'dopamin': 'dopamine', 'phonolog': 'phonological', 'visuospati': 'visuospatial',
+    'distractor': 'distractor', 'distract': 'distraction', 'consolid': 'consolidation',
+    'articulatori': 'articulatory', 'cerebellar': 'cerebellar', 'cerebellum': 'cerebellum',
+    'linguist': 'linguistic', 'vocabulari': 'vocabulary', 'acquisit': 'acquisition',
+    'mathemat': 'mathematics', 'dyslexia': 'dyslexia', 'amplitud': 'amplitude',
+    'episod': 'episodic', 'fatigu': 'fatigue', 'symmetri': 'symmetry',
+    'incongru': 'incongruent', 'congruent': 'congruent', 'congruenc': 'congruency',
+    'flexibl': 'flexibility', 'proactiv': 'proactive', 'reactiv': 'reactive',
+    'prioriti': 'prioritization', 'persist': 'persistent', 'familiar': 'familiarity',
+    'contextu': 'contextual', 'sequenti': 'sequential', 'retent': 'retention',
+    'hemisph': 'hemisphere', 'electrod': 'electrode', 'transcrani': 'transcranial',
+    'psychiatri': 'psychiatric', 'cortic': 'cortical', 'preci': 'precision',
+    'paramet': 'parametric', 'magnitud': 'magnitude', 'synapt': 'synaptic',
+    'contralat': 'contralateral', 'irrelev': 'irrelevant', 'concurr': 'concurrent',
+    'rehears': 'rehearsal', 'suppress': 'suppression', 'hyperact': 'hyperactivity',
+    'inatt': 'inattention', 'healthi': 'healthy', 'disabl': 'disability',
+    'exerci': 'exercise', 'depress': 'depression', 'depriv': 'deprivation',
+    'diagnos': 'diagnosis', 'predictor': 'predictor', 'noi': 'noise',
+    'guidanc': 'guidance', 'fidel': 'fidelity', 'dynam': 'dynamics',
+    'bilingu': 'bilingual', 'syntact': 'syntactic', 'gestur': 'gesture',
+    'saccad': 'saccade', 'fixat': 'fixation', 'orient': 'orientation',
+    'decod': 'decoding', 'pupil': 'pupil', 'retro': 'retroactive',
+    'disea': 'disease', 'injuri': 'injury', 'placebo': 'placebo',
+    'posterior': 'posterior', 'anterior': 'anterior',
+    'dorsolater': 'dorsolateral', 'ventrolater': 'ventrolateral',
+    'memor': 'memory', 'imageri': 'imagery', 'solv': 'solving',
+    'theori': 'theory', 'comorbid': 'comorbidity', 'organiz': 'organization',
+    'choic': 'choice', 'acut': 'acute', 'latenc': 'latency',
+}
+
+
+def unstem_words(words):
+    """Convert stemmed words back to readable forms."""
+    return [STEM_DISPLAY_MAP.get(w, w) for w in words]
+
+
+def build_stem_display_map(texts):
+    """Placeholder — uses the hardcoded STEM_DISPLAY_MAP."""
+    return STEM_DISPLAY_MAP
 
 
 def extract_text_from_pdf(pdf_path):
