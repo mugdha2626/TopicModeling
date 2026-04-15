@@ -187,8 +187,11 @@ def calculate_topic_diversity(topics, num_words=10):
     1.0 = all topics have completely distinct words, 0 = all topics share the same words."""
     all_top_words = []
     for topic in topics:
-        words = topic.get("words", [])[:num_words]
-        all_top_words.extend(words)
+        # Handle both list format and comma-joined string format
+        words = topic.get("words", topic.get("Words", ""))
+        if isinstance(words, str):
+            words = [w.strip() for w in words.split(",")]
+        all_top_words.extend(words[:num_words])
     if not all_top_words:
         return 0.0
     return len(set(all_top_words)) / len(all_top_words)

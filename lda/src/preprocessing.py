@@ -329,6 +329,11 @@ def preprocess_text(text):
 # Snowball produces ugly stems; this makes topic words readable in the UI
 STEM_DISPLAY_MAP = {
     'emot': 'emotion', 'arithmet': 'arithmetic', 'oscil': 'oscillation',
+    'languag': 'language', 'comprehen': 'comprehension', 'intellig': 'intelligence',
+    'auditori': 'auditory', 'modal': 'modality', 'remov': 'removal',
+    'orient': 'orientation', 'irrelev': 'irrelevant', 'strategi': 'strategy',
+    'neuroimag': 'neuroimaging', 'motor': 'motor', 'bias': 'bias',
+    'poor': 'poor', 'length': 'length', 'color': 'color',
     'neuron': 'neuron', 'hippocamp': 'hippocampal', 'cortex': 'cortex',
     'stimul': 'stimulation', 'inhibitori': 'inhibitory', 'anxieti': 'anxiety',
     'regul': 'regulation', 'schizophrenia': 'schizophrenia',
