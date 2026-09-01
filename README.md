@@ -80,9 +80,67 @@ Author et al. - 2023 - Title of the Paper.pdf
 
 ---
 
+## Building a Corpus (`fetch_papers.py`)
+
+Don't have PDFs yet? `fetch_papers.py` bulk-downloads full-text PDFs for a
+PubMed search, so you can build your own corpus to feed the app.
+
+It pulls **only** from two free, sanctioned open-access sources and rate-limits
+itself to stay within each service's usage policy:
+
+1. **PMC Open Access Subset** — NCBI's world-readable AWS bucket (`pmc-oa-opendata`), for papers with a PMCID
+2. **Unpaywall** — for everything else that has a legally posted free copy (by DOI)
+
+Anything neither source can get is written to `still_missing.csv` for your
+library's interlibrary-loan service. Paywalled papers are never bypassed.
+
+### Step 1: Export a CSV from PubMed
+1. Search [PubMed](https://pubmed.ncbi.nlm.nih.gov/) for your topic
+2. **Save** → Selection: *All results* → Format: **CSV** → **Create file**
+3. The CSV must contain `PMID`, `PMCID`, and `DOI` columns (PubMed's default export does)
+
+### Step 2: Install dependencies
+```bash
+pip install requests pandas
+```
+
+### Step 3: Test with a few papers first
+```bash
+python fetch_papers.py --csv your-search.csv --email you@university.edu --limit 25
+```
+Use a **real email** — Unpaywall requires it and NCBI asks for it. A minute or
+so later, check that PDFs appeared in the `pdfs/` folder.
+
+### Step 4: Run the full fetch
+```bash
+python fetch_papers.py --csv your-search.csv --email you@university.edu --zip
+```
+This downloads everything available and, with `--zip`, bundles the PDFs into
+`pdfs.zip` — ready to upload straight into the app.
+
+**Options**
+| Flag | What it does |
+|------|--------------|
+| `--csv` | PubMed CSV export (required) |
+| `--email` | Your email, required by Unpaywall/NCBI (required) |
+| `--limit N` | Stop after N new PDFs per stage — good for a quick test |
+| `--stage {1,2}` | Run only PMC (1) or only Unpaywall (2) |
+| `--zip` | Zip the PDFs when finished |
+| `--out DIR` | Output folder (default `pdfs/`) |
+
+**Resumable:** progress is saved in `pdfs/_state.json`. Press `Ctrl-C` and rerun
+the same command any time to pick up where it left off — already-downloaded
+papers are skipped.
+
+> Not every paper is free to download — only a fraction of academic articles are
+> open access — so expect to retrieve a subset of your search, not all of it.
+
+---
+
 ## Project Structure
 ```
 TopicModeling/
+├── fetch_papers.py             # Bulk-download open-access PDFs from a PubMed CSV
 └── lda/
     ├── src/
     │   ├── App.js              # React frontend
