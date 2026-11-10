@@ -1,6 +1,6 @@
 """
 Shared preprocessing module for topic modeling.
-Used by both app.py (Flask backend) and gen.py (standalone script).
+Used by both app.py (Flask backend) and the command-line scripts.
 """
 
 import re
@@ -10,13 +10,23 @@ from nltk.stem import SnowballStemmer
 from nltk.corpus import stopwords
 from PyPDF2 import PdfReader
 from gensim import corpora
-from sklearn.feature_extraction.text import CountVectorizer
 
 logger = logging.getLogger(__name__)
 
+# PDF extraction emits fi/fl/ff ligatures as single non-ASCII glyphs. Expand them to plain
+# letters before the non-ASCII stripping in preprocess_text, otherwise words like
+# "fluorescence" or "figure" lose those letters and become "uorescence" / "gure".
+LIGATURES = {
+    "ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi",
+    "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st",
+}
+
 # Initialize NLTK resources
 try:
-    nltk.download("stopwords", quiet=True)
+    try:
+        nltk.data.find("corpora/stopwords")            # already installed: never touch the network
+    except LookupError:
+        nltk.download("stopwords", quiet=True)
     _test_stops = stopwords.words("english")
     stemmer = SnowballStemmer("english")
     _test_stem = stemmer.stem("studies")
@@ -235,6 +245,10 @@ def preprocess_text(text):
     - Convert to lowercase and filter short words
     - Lemmatize words and remove stopwords
     """
+    # Expand fi/fl ligatures before non-ASCII is stripped, so words stay intact.
+    for ligature, letters in LIGATURES.items():
+        text = text.replace(ligature, letters)
+
     # Rejoin hyphenated line breaks (e.g., "signi-\nficant" -> "significant")
     # This is critical for PDF-extracted text where words split across lines
     text = re.sub(r'(\w+)-\s*\n\s*(\w+)', r'\1\2', text)
@@ -374,7 +388,7 @@ def unstem_words(words):
 
 
 def build_stem_display_map(texts):
-    """Placeholder — uses the hardcoded STEM_DISPLAY_MAP."""
+    """Return the hardcoded STEM_DISPLAY_MAP (kept for the app's call signature)."""
     return STEM_DISPLAY_MAP
 
 
@@ -425,8 +439,14 @@ def find_cutoff_position(text):
     return len(text)
 
 
-def clean_pdf_text(text):
-    """Remove citations and bibliography from PDF text."""
+def clean_pdf_text(text, keep_references=False):
+    """Remove in-text citations and (optionally) the reference list from PDF text.
+
+    IMPORTANT: for the reference cut to work, this must run on RAW text, before stemming.
+    (The default script path stems first, which removes the word "references" and defeats the
+    detector; the bibliography A/B experiment calls this on raw text on purpose.)
+    keep_references=True skips the reference-list truncation so the bibliography is retained.
+    """
     # Remove in-text citations
     text = re.sub(r'\([A-Z][a-zA-Z]+(?:\s+(?:et al\.|and|&)\s+[A-Z][a-zA-Z]+)*,?\s*\d{4}[a-z]?\)', ' ', text)
     text = re.sub(r'\[[0-9,\-\s]+\]', ' ', text)
@@ -435,6 +455,9 @@ def clean_pdf_text(text):
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"\b\d+\b", " ", text)
     text = text.lower()
+
+    if keep_references:
+        return text
 
     cutoff_pos = find_cutoff_position(text)
 
