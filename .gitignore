@@ -30,8 +30,9 @@ Thumbs.db
 # Test data (downloaded PDFs)
 test_data/
 
-# fetch_papers.py output — never commit downloaded corpora
+# fetch_papers.py output and downloaded corpora: never commit
 pdfs/
+glioma_corpuses/
 *.zip
 _state.json
 still_missing.csv
