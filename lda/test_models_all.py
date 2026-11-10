@@ -3,12 +3,8 @@ Test LDA and HDP across 100, 1000, and optionally 10000 papers.
 Reports topic words, diversity, overlap, coherence, and writes each model's
 topic-word CSV (app Compare-tab format) to results/<model>/<corpus>/.
 
-Every model function now takes seed= (default 42, matching the prior hardcoded
-value) so runs can be repeated with a different seed -- see controls.py for a
-harness that does this per (corpus, model, control, seed).
-
 Usage (from lda/):
-    venv/bin/python test_models_all.py                 # 100 + 1000, both models
+    venv/bin/python test_models_all.py                 # 100 + 1000
     venv/bin/python test_models_all.py --all           # + 10000
     venv/bin/python test_models_all.py --models lda --lda-k 5
 """
@@ -83,20 +79,37 @@ def load_corpus(zip_path, cache_root="cache"):
     return texts, stopwords
 
 
-def vectorize(texts, stopwords):
-    """Vectorize with same params as app.py."""
-    n = len(texts)
+def make_vectorizer(n, stopwords):
+    """Build an (unfitted) CountVectorizer with the standard research params, sized by corpus n.
+    Same params as app.py / the script paths."""
     if n < 50: mf = 1000
     elif n < 500: mf = 3000
     elif n < 5000: mf = 5000
     else: mf = 8000
 
-    vec = CountVectorizer(
+    return CountVectorizer(
         max_df=0.35, min_df=max(2, n // 50),
         stop_words=stopwords,
         token_pattern=r'\b[a-zA-Z]{3,}\b',
         max_features=mf,
     )
+
+
+def vectorize(texts, stopwords, vectorizer=None):
+    """Vectorize `texts` into a document-term matrix.
+
+    - vectorizer=None (default): fit a fresh CountVectorizer sized to len(texts) and
+      fit_transform -- the original behaviour, preserved byte-for-byte.
+    - vectorizer=<a fitted CountVectorizer>: only .transform(), i.e. a FROZEN vocabulary.
+      Used for control / null-model runs so every scrambled corpus is scored on the SAME
+      word support as the real corpus. This also prevents the "empty vocabulary" crash:
+      scrambled corpora flatten document frequency so a fresh fit prunes every term via
+      min_df/max_df, but transform against a pre-fitted vocab never raises.
+    """
+    if vectorizer is not None:
+        dtm = vectorizer.transform(texts)
+        return dtm, vectorizer
+    vec = make_vectorizer(len(texts), stopwords)
     dtm = vec.fit_transform(texts)
     return dtm, vec
 
@@ -144,10 +157,11 @@ def evaluate_topics(topic_word_lists, texts, dictionary, label=""):
     }
 
 
-def run_lda(texts, stopwords, label, num_topics=10, out_dir=None, seed=42):
-    """Run LDA with given topic count."""
+def run_lda(texts, stopwords, label, num_topics=10, out_dir=None, seed=42, vectorizer=None):
+    """Run LDA with given topic count. Pass a fitted `vectorizer` to score `texts` on a
+    frozen vocabulary (control/null runs); otherwise a fresh vectorizer is fit on `texts`."""
     print(f"\n  --- LDA (k={num_topics}) on {label} ---")
-    dtm, vec = vectorize(texts, stopwords)
+    dtm, vec = vectorize(texts, stopwords, vectorizer=vectorizer)
     features = vec.get_feature_names_out()
     corpus, dictionary = prepare_gensim_corpus(dtm, vec)
 
@@ -187,12 +201,12 @@ def run_lda(texts, stopwords, label, num_topics=10, out_dir=None, seed=42):
     return metrics
 
 
-def run_lda_auto(texts, stopwords, label, out_dir=None, fixed_k=None, seed=42):
+def run_lda_auto(texts, stopwords, label, out_dir=None, fixed_k=None, seed=42, vectorizer=None):
     """Run LDA with automatic topic selection via coherence."""
     if fixed_k:
-        return run_lda(texts, stopwords, label, num_topics=fixed_k, out_dir=out_dir, seed=seed)
+        return run_lda(texts, stopwords, label, num_topics=fixed_k, out_dir=out_dir, seed=seed, vectorizer=vectorizer)
     print(f"\n  --- LDA Auto-k on {label} ---")
-    dtm, vec = vectorize(texts, stopwords)
+    dtm, vec = vectorize(texts, stopwords, vectorizer=vectorizer)
     features = vec.get_feature_names_out()
     corpus, dictionary = prepare_gensim_corpus(dtm, vec)
     texts_tok = [doc.split() for doc in texts]
@@ -235,13 +249,18 @@ def run_lda_auto(texts, stopwords, label, out_dir=None, fixed_k=None, seed=42):
     print(f"  Best k={best_k} (coherence={best_coherence:.4f})")
 
     # Re-run with best k and full iterations
-    return run_lda(texts, stopwords, label, num_topics=best_k, out_dir=out_dir, seed=seed)
+    return run_lda(texts, stopwords, label, num_topics=best_k, out_dir=out_dir, seed=seed, vectorizer=vectorizer)
 
 
-def run_hdp(texts, stopwords, label, out_dir=None, seed=42):
-    """Run HDP with current best params."""
+def run_hdp(texts, stopwords, label, out_dir=None, seed=42, vectorizer=None, passes=5):
+    """Run HDP. Pass a fitted `vectorizer` to score `texts` on a frozen vocabulary
+    (control/null runs); otherwise a fresh vectorizer is fit on `texts`.
+
+    `passes` controls multi-pass online training (see below). passes=1 restores the old
+    single-pass behaviour.
+    """
     print(f"\n  --- HDP on {label} ---")
-    dtm, vec = vectorize(texts, stopwords)
+    dtm, vec = vectorize(texts, stopwords, vectorizer=vectorizer)
     features = vec.get_feature_names_out()
     corpus, dictionary = prepare_gensim_corpus(dtm, vec)
 
@@ -250,11 +269,19 @@ def run_hdp(texts, stopwords, label, out_dir=None, seed=42):
     elif n < 1000: T, gamma = 30, 1.0
     else: T, gamma = 50, 1.5
 
+    # Multi-pass online training with a small chunksize. A single pass (the old default)
+    # under-fits: it leaves the document-topic posteriors too diffuse, so the max-doc-weight
+    # ("weak topic") filter below deletes almost every topic and HDP collapses to one. That is
+    # what made HDP fail the known-topic positive control. Several passes over a small chunk
+    # sharpen the posteriors so the real topics survive the filters. (LDA is unaffected.)
+    chunksize = max(16, n // 20)
     hdp = HdpModel(
         corpus=corpus, id2word=dictionary, random_state=seed,
         alpha=1, gamma=gamma, eta=0.01, T=T, K=8,
-        kappa=0.7, tau=256.0, chunksize=min(256, n),
+        kappa=1.0, tau=64.0, chunksize=chunksize,
     )
+    for _ in range(max(0, passes - 1)):
+        hdp.update(corpus)
 
     all_topics = hdp.get_topics()
     lda_alpha, _ = hdp.hdp_to_lda()
@@ -383,21 +410,19 @@ if __name__ == '__main__':
             rows.append((f"LDA-k{args.lda_k}" if args.lda_k else 'LDA-auto', r, time.time() - t))
         all_results.append((label, rows))
 
-    print(f"\n\n{'='*80}")
-    print(f"  FINAL COMPARISON")
-    print(f"{'='*80}")
-    print(f"  {'Corpus':<13s} | {'Model':<16s} | {'Topics':>6s} | {'Div':>5s} | {'Overlap':>7s} | {'c_v':>6s} | {'c_v*':>6s} | {'NPMI':>6s} | {'Outl':>5s} | {'sec':>6s}")
-    print(f"  {'-'*13}-+-{'-'*16}-+-{'-'*6}-+-{'-'*5}-+-{'-'*7}-+-{'-'*6}-+-{'-'*6}-+-{'-'*6}-+-{'-'*5}-+-{'-'*6}")
+    print(f"\n\n{'='*72}")
+    print(f"  FINAL COMPARISON   (c_v = coherence on each model's own tokens)")
+    print(f"{'='*72}")
+    print(f"  {'Corpus':<13s} | {'Model':<10s} | {'Topics':>6s} | {'Div':>5s} | {'Overlap':>7s} | {'c_v':>6s} | {'sec':>6s}")
+    print(f"  {'-'*13}-+-{'-'*10}-+-{'-'*6}-+-{'-'*5}-+-{'-'*7}-+-{'-'*6}-+-{'-'*6}")
     table = []
     for label, rows in all_results:
         for name, r, secs in rows:
-            cs = r.get('coherence_shared'); npmi = r.get('npmi'); outl = r.get('outlier_fraction')
-            print(f"  {label:<13s} | {name:<16s} | {r['n_topics']:6d} | {r['diversity']:.3f} | {r['avg_overlap']:7.2f} | "
-                  f"{(r['coherence'] or 0):.4f} | {(f'{cs:.4f}' if cs is not None else '   -  '):>6s} | "
-                  f"{(f'{npmi:.3f}' if npmi is not None else '  -  '):>6s} | {(f'{outl:.1%}' if outl is not None else '  -  '):>5s} | {secs:6.0f}")
-            table.append({'corpus': label, 'model': name, 'n_topics': r['n_topics'], 'diversity': r['diversity'],
-                          'avg_overlap': r['avg_overlap'], 'coherence': r['coherence'], 'coherence_shared': cs,
-                          'npmi': npmi, 'outlier_fraction': outl, 'seconds': secs, 'topic_words': r.get('topic_words')})
+            print(f"  {label:<13s} | {name:<10s} | {r['n_topics']:6d} | {r['diversity']:.3f} | "
+                  f"{r['avg_overlap']:7.2f} | {(r['coherence'] or 0):.4f} | {secs:6.0f}")
+            table.append({'corpus': label, 'model': name, 'n_topics': r['n_topics'],
+                          'diversity': r['diversity'], 'avg_overlap': r['avg_overlap'],
+                          'coherence': r['coherence'], 'seconds': secs, 'topic_words': r.get('topic_words')})
     os.makedirs('results', exist_ok=True)
     with open('results/model_comparison.json', 'w') as fh:
         json.dump(table, fh, indent=2)
@@ -410,8 +435,8 @@ if __name__ == '__main__':
             rows = [r for r in table if r['corpus'] == c]
             names = [r['model'] for r in rows]
             x = np.arange(len(rows)); w = 0.38
-            coh = [(r['coherence_shared'] if r.get('coherence_shared') is not None else r['coherence']) or 0 for r in rows]
-            ax.bar(x - w / 2, coh, w, label='c_v coherence (shared stemmed reference)', color='steelblue')
+            coh = [(r['coherence'] or 0) for r in rows]
+            ax.bar(x - w / 2, coh, w, label='c_v coherence', color='steelblue')
             ax.bar(x + w / 2, [r['diversity'] for r in rows], w, label='topic diversity', color='seagreen')
             for i, (a, b, r) in enumerate(zip(coh, [r['diversity'] for r in rows], rows)):
                 ax.text(i - w / 2, a, f"{a:.2f}", ha='center', va='bottom', fontsize=7)
@@ -420,7 +445,7 @@ if __name__ == '__main__':
             ax.set_xticks(x); ax.set_xticklabels(names, fontsize=8, rotation=15)
             ax.set_ylim(0, 1.05); ax.set_title(c, fontsize=10)
         axes[0][0].legend(fontsize=7, loc='upper left')
-        fig.suptitle('LDA vs HDP — coherence and diversity per corpus', fontsize=12)
+        fig.suptitle('LDA vs HDP: coherence and diversity per corpus', fontsize=12)
         plt.tight_layout(); plt.savefig('results/model_comparison.png', dpi=130); plt.close()
         print("  chart -> results/model_comparison.png")
     except Exception as e:
