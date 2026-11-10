@@ -387,11 +387,6 @@ def unstem_words(words):
     return [STEM_DISPLAY_MAP.get(w, w) for w in words]
 
 
-def build_stem_display_map(texts):
-    """Return the hardcoded STEM_DISPLAY_MAP (kept for the app's call signature)."""
-    return STEM_DISPLAY_MAP
-
-
 def extract_text_from_pdf(pdf_path):
     """Extract text from a PDF file with encryption handling."""
     text = ""

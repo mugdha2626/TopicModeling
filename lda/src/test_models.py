@@ -18,13 +18,11 @@ from sklearn.datasets import fetch_20newsgroups
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.decomposition import LatentDirichletAllocation as LDA
 from gensim.models import HdpModel, CoherenceModel
-from gensim import corpora
 
 from preprocessing import (
     preprocess_text,
     clean_pdf_text,
     prepare_gensim_corpus,
-    ENHANCED_STOPWORDS,
     get_all_stopwords,
 )
 
@@ -32,9 +30,7 @@ from comparison_utils import (
     calculate_tvd,
     calculate_optimal_transport_distance,
     calculate_best_match_metrics,
-    bootstrap_ot_distance,
     mann_whitney_test,
-    permutation_test_ot_distance,
 )
 
 

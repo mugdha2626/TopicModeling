@@ -27,7 +27,7 @@ from preprocessing import (
     ENHANCED_STOPWORDS, preprocess_text, extract_text_from_pdf,
     clean_pdf_text, find_cutoff_position, prepare_gensim_corpus,
     extract_metadata, get_all_stopwords,
-    build_stem_display_map, unstem_words
+    STEM_DISPLAY_MAP, unstem_words
 )
 
 matplotlib.use("Agg")
@@ -84,7 +84,7 @@ logging.getLogger("PyPDF2").setLevel(logging.ERROR)
 
 def get_pubmed_id(title, author, year, retmax=3):
     """Search PubMed and return best matching ID"""
-    Entrez.email = "your.email@example.com"  # Required by NCBI
+    Entrez.email = os.environ.get("NCBI_EMAIL", "")  # NCBI asks for a contact email
     query = '({title}[Title]) AND ({author}[Author]) AND {year}[Date - Publication]'.format(title=title, author=author, year=year)
     
     try:
@@ -433,7 +433,7 @@ def analyze_hdp_task(file, form_data):
         print(f"  [1/7] PDF extraction: {pdf_count} valid documents")
 
         # Build stem→display word map for readable topic words
-        stem_map = build_stem_display_map(pdf_texts)
+        stem_map = STEM_DISPLAY_MAP
 
         # Scale vocabulary based on corpus size
         # max_df=0.35 drops words in 35%+ of docs (strict for single-field corpora)
@@ -537,7 +537,7 @@ def analyze_hdp_task(file, form_data):
             significant_topic_indices = [idx for idx, _ in topic_prevalences[:3]]
 
         # Gate 4: Remove junk/catch-all topics (flat word distribution)
-        # Threshold scales with vocab size — larger vocab = lower expected top-word prob
+        # Threshold scales with vocab size: larger vocab = lower expected top-word prob
         vocab_size = len(feature_names)
         flat_threshold = max(0.003, 10.0 / vocab_size)
         print(f"   Flat topic threshold: {flat_threshold:.4f} (vocab={vocab_size})")
@@ -904,7 +904,7 @@ def analyze_task(file, form_data):
         print(f"{'='*60}")
         print(f"  [1/6] PDF extraction: {pdf_count} valid documents")
 
-        stem_map = build_stem_display_map(pdf_texts)
+        stem_map = STEM_DISPLAY_MAP
 
         # Scale vocabulary and max_df based on corpus size
         if pdf_count < 30:
@@ -1837,18 +1837,6 @@ def compare_topics():
         import traceback
         traceback.print_exc()
         return jsonify({"error": "Comparison failed: " + str(e)}), 500
-
-@app.route("/summary", methods=["POST"])
-def summary():
-    try:
-        num_topics = int(request.form["numTopics"])
-        num_words = int(request.form["numWords"])
-        summary_text = "Analysis performed with {} topics and {} words per topic.".format(num_topics, num_words)
-        return jsonify({"results": summary_text})
-    except Exception as e:
-        logger.error("Error in summary endpoint: %s", str(e))
-        return jsonify({"error": str(e)}), 500
-
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5001))
